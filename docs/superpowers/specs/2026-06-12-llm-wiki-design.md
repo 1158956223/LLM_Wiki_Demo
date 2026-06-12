@@ -917,6 +917,121 @@ proposal 来源：
 - 报告长期 pending 的 proposal。
 - 向 `wiki/log.md` 追加 lint 记录。
 
+`lint` 借鉴 LLM Wiki 的核心做法：它不只是普通文件格式检查，而是 Wiki 健康检查和 Review 入口。第一版保持 CLI 轻量实现，但按四类问题组织结果。
+
+支持命令：
+
+```powershell
+python -m llm_wiki lint
+python -m llm_wiki lint --json
+python -m llm_wiki lint --write-review
+```
+
+输出级别：
+
+- `ERROR`：违反 wiki 基础协议，通常需要修复。
+- `WARNING`：可能影响导航、检索或维护质量，但不阻塞普通使用。
+- `REVIEW`：需要人判断的知识健康问题，不是格式错误。
+
+文本输出格式：
+
+```text
+ERROR structure missing_frontmatter wiki/concepts/RAG.md
+WARNING navigation missing_from_index wiki/concepts/LLM-Wiki.md
+REVIEW health isolated_page wiki/entities/DeepSeek.md
+```
+
+JSON 输出格式：
+
+```json
+[
+  {
+    "level": "ERROR",
+    "category": "structure",
+    "code": "missing_frontmatter",
+    "path": "wiki/concepts/RAG.md",
+    "message": "页面缺少 YAML frontmatter"
+  }
+]
+```
+
+#### Structure Lint
+
+结构检查用于保证 wiki 页面符合基础协议。这类问题大多是 `ERROR`。
+
+规则：
+
+- 页面缺 YAML frontmatter：`ERROR`
+- frontmatter `type` 非法：`ERROR`
+- `type` 和所在目录不匹配：`ERROR`
+- 页面缺一级标题：`ERROR`
+- `title` 和一级标题不一致：`ERROR`
+- 页面缺 `## 来源`：`ERROR`
+- `## 来源` 为空：`ERROR`
+- 引用路径不存在：`ERROR`
+- proposal 缺 required fields：`ERROR`
+- proposal target 路径非法：`ERROR`
+
+#### Navigation Lint
+
+导航检查用于维护 `index.md`、wikilink 网络和基本可浏览性。这类问题通常是 `WARNING`。
+
+规则：
+
+- wiki 页面没有出现在 `wiki/index.md`：`WARNING`
+- `wiki/index.md` 中列出的页面不存在：`WARNING`
+- 页面没有任何 `[[wikilink]]`：`WARNING`
+- 页面被其他页面引用，但文件不存在：`WARNING`
+- `overview.md` 可能过期：`WARNING`
+
+#### Source Traceability Lint
+
+来源追踪检查用于维护 raw source、source summary 和引用链的一致性。
+
+规则：
+
+- `raw/sources/` 文件 hash 变化但未重新 ingest：`WARNING`
+- source 页面没有对应 raw source：`ERROR`
+- raw source 没有对应 `wiki/sources/`：`WARNING`
+- 非 source 页面引用了不存在的 source/wiki 页面：`ERROR`
+- source 页面引用路径不是 `raw/sources/`：`ERROR`
+
+#### Knowledge Health Lint
+
+知识健康检查用于发现需要人判断的问题。这类结果通常是 `REVIEW` 或 `WARNING`。
+
+规则：
+
+- 孤立页面，没有入链也没有出链：`REVIEW`
+- `status: deprecated` 页面仍被 active 页面引用：`REVIEW`
+- pending proposal 超过 7 天：`REVIEW`
+- 页面 tags 为空：`WARNING`
+- synthesis 页面来源少于 2 个：`REVIEW`
+- query 页面缺少 `## 后续可沉淀页面`：`REVIEW`
+- 页面太长，建议拆分：`REVIEW`
+- 相似标题页面可能重复：`REVIEW`
+
+`lint --write-review` 将 `REVIEW` 类结果写入 `.llm-wiki/review.json`，不写入 `proposals/`，避免把健康检查结果和可应用修改建议混在一起。
+
+`.llm-wiki/review.json` 示例：
+
+```json
+{
+  "version": 1,
+  "generated_at": "2026-06-12T13:00:00+08:00",
+  "items": [
+    {
+      "code": "isolated_page",
+      "path": "wiki/entities/DeepSeek.md",
+      "message": "页面没有入链也没有出链",
+      "suggested_action": "考虑添加 wikilink，或确认该页面是否仍有保留价值"
+    }
+  ]
+}
+```
+
+`lint` 永远不自动修改 `wiki/`、`raw/` 或 `proposals/`。任何实际内容修改都必须通过 `propose -> apply`。
+
 ## Proposal 格式
 
 proposal 是一个带 YAML frontmatter 的 Markdown 文件：
