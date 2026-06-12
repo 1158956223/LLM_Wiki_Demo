@@ -136,6 +136,378 @@ LLM_Wiki_Demo/
 
 API Key 不能写入 `.llm-wiki/`。DeepSeek API Key 只通过环境变量 `DEEPSEEK_API_KEY` 读取。
 
+## Wiki 页面模型
+
+所有正式 wiki 页面统一使用 YAML frontmatter。这样页面仍然是普通 Markdown，人可以直接阅读和编辑；同时程序可以稳定读取页面类型、标题、来源、标签和状态。
+
+基础 frontmatter：
+
+```yaml
+---
+type: concept
+title: LLM Wiki
+created_at: 2026-06-12
+updated_at: 2026-06-12
+sources:
+  - wiki/sources/karpathy-llm-wiki.md
+tags:
+  - llm
+  - knowledge-management
+status: active
+---
+```
+
+字段含义：
+
+- `type`：页面类型。第一版支持 `source`、`concept`、`entity`、`synthesis`、`query`。
+- `title`：页面标题，应该和一级标题保持一致。
+- `created_at`：页面创建日期。
+- `updated_at`：页面最近更新时间。
+- `sources`：支撑这个页面的来源路径。
+- `tags`：主题标签，用于搜索、索引和组织。
+- `status`：页面状态。第一版支持 `active`、`draft`、`deprecated`。
+
+第一版不加入 `confidence`、`owner`、`reviewed_at`、`aliases` 等字段，避免过早把 wiki 页面变成复杂数据库记录。
+
+## 页面类型与模板
+
+第一版支持五种页面类型。它们使用统一 frontmatter，但正文模板不同。
+
+### `source`
+
+位置：`wiki/sources/`
+
+职责：对应一个原始 Markdown 文件，记录它讲了什么、有哪些重要观点、可提炼出哪些概念或实体。
+
+模板：
+
+```markdown
+---
+type: source
+title: Karpathy LLM Wiki
+created_at: 2026-06-12
+updated_at: 2026-06-12
+sources:
+  - raw/sources/karpathy-llm-wiki.md
+tags:
+  - llm-wiki
+status: active
+---
+
+# Karpathy LLM Wiki
+
+## 摘要
+
+## 关键观点
+
+## 可沉淀概念
+
+## 涉及实体
+
+## 引用片段
+
+## 来源
+
+- `raw/sources/karpathy-llm-wiki.md`
+```
+
+### `concept`
+
+位置：`wiki/concepts/`
+
+职责：长期维护一个概念，例如 RAG、LLM Wiki、Embedding、人工确认写回。
+
+模板：
+
+```markdown
+---
+type: concept
+title: LLM Wiki
+created_at: 2026-06-12
+updated_at: 2026-06-12
+sources:
+  - wiki/sources/karpathy-llm-wiki.md
+tags:
+  - llm
+status: active
+---
+
+# LLM Wiki
+
+## 定义
+
+## 核心原则
+
+## 适用场景
+
+## 与相关概念的区别
+
+## 来源
+
+- `wiki/sources/karpathy-llm-wiki.md#关键观点`
+```
+
+### `entity`
+
+位置：`wiki/entities/`
+
+职责：记录人物、项目、工具、模型、公司、论文等实体。
+
+模板：
+
+```markdown
+---
+type: entity
+title: DeepSeek
+created_at: 2026-06-12
+updated_at: 2026-06-12
+sources:
+  - wiki/sources/deepseek-api-notes.md
+tags:
+  - model-provider
+status: active
+---
+
+# DeepSeek
+
+## 简介
+
+## 与本 wiki 的关系
+
+## 关键事实
+
+## 相关概念
+
+## 来源
+
+- `wiki/sources/deepseek-api-notes.md`
+```
+
+### `synthesis`
+
+位置：`wiki/synthesis/`
+
+职责：跨多个来源形成分析，不对应单一资料。比如“LLM Wiki 与传统 RAG 的区别”。
+
+模板：
+
+```markdown
+---
+type: synthesis
+title: LLM Wiki 与传统 RAG 的区别
+created_at: 2026-06-12
+updated_at: 2026-06-12
+sources:
+  - wiki/sources/karpathy-llm-wiki.md
+  - wiki/concepts/RAG.md
+tags:
+  - rag
+  - llm-wiki
+status: active
+---
+
+# LLM Wiki 与传统 RAG 的区别
+
+## 结论
+
+## 对比
+
+## 适用边界
+
+## 仍待验证的问题
+
+## 来源
+
+- `wiki/sources/karpathy-llm-wiki.md#关键观点`
+- `wiki/concepts/RAG.md#定义`
+```
+
+### `query`
+
+位置：`wiki/queries/`
+
+职责：沉淀值得复用的问题和答案。它不是聊天记录，而是经过整理后的知识条目。
+
+模板：
+
+```markdown
+---
+type: query
+title: LLM Wiki 和传统 RAG 有什么区别
+created_at: 2026-06-12
+updated_at: 2026-06-12
+sources:
+  - wiki/sources/karpathy-llm-wiki.md
+  - wiki/concepts/RAG.md
+tags:
+  - rag
+  - llm-wiki
+status: active
+---
+
+# LLM Wiki 和传统 RAG 有什么区别？
+
+## 问题
+
+## 回答
+
+## 后续可沉淀页面
+
+## 来源
+
+- `wiki/sources/karpathy-llm-wiki.md#关键观点`
+- `wiki/concepts/RAG.md#定义`
+```
+
+## 文件命名规则
+
+文件名使用标题生成的 slug。第一版保留中文、英文和数字，空白转成短横线。
+
+规则：
+
+1. 去掉标题首尾空白。
+2. 空白字符统一转成 `-`。
+3. 移除 Windows 非法字符：`< > : " / \ | ? *`。
+4. 连续多个 `-` 合并成一个。
+5. 文件名最多 80 个字符，超出后截断。
+6. 如果重名，在末尾追加 6 位短 hash。
+7. 保留大小写，不强制小写。
+8. 页面标题以 frontmatter `title` 和一级标题为准，文件名只是路径。
+
+示例：
+
+```text
+LLM Wiki 与传统 RAG 的区别？
+-> LLM-Wiki-与传统-RAG-的区别.md
+
+LLM Wiki 与传统 RAG 的区别？
+-> LLM-Wiki-与传统-RAG-的区别-a1b2c3.md
+```
+
+页面类型到目录的映射：
+
+```text
+source    -> wiki/sources/
+concept   -> wiki/concepts/
+entity    -> wiki/entities/
+synthesis -> wiki/synthesis/
+query     -> wiki/queries/
+```
+
+`source` 页面文件名来自原始文件名，而不是 LLM 总结出的标题。这样原始资料到 source 页面之间的映射更稳定：
+
+```text
+raw/sources/karpathy-llm-wiki.md
+-> wiki/sources/karpathy-llm-wiki.md
+```
+
+## 引用格式
+
+第一版使用页面末尾统一 `## 来源` 列表，不使用正文脚注。
+
+格式：
+
+```markdown
+## 来源
+
+- `wiki/sources/karpathy-llm-wiki.md#关键观点`
+- `wiki/concepts/RAG.md#定义`
+```
+
+规则：
+
+1. 每个正式 wiki 页面都应该包含 `## 来源`。
+2. `source` 页面可以引用 `raw/sources/` 下的原始文件。
+3. `concept`、`entity`、`synthesis`、`query` 页面引用 wiki 页面。
+4. 引用格式是 `路径#标题`。
+5. 如果没有具体 heading，可以只写路径。
+6. `lint` 第一版检查 `## 来源` 是否存在、来源列表是否非空、路径是否存在。
+7. 如果引用包含 `#heading`，第一版不强制检查 heading 是否存在，后续再增强。
+8. DeepSeek 的 `query` 输出也必须包含引用列表。
+9. `proposal` 必须包含 `## Citations` 或 `## 引用`，否则 `apply` 拒绝执行。
+
+硬规则：没有来源的知识不能进入正式 wiki。如果来源不足，只能进入 query 草稿或 proposal，并标注“证据不足”。
+
+## `state.json` 结构
+
+`state.json` 是工具运行所需的短期状态，不是长期知识。它可以删除并重建，不应该承载重要知识。
+
+第一版结构：
+
+```json
+{
+  "version": 1,
+  "sources": {
+    "raw/sources/karpathy-llm-wiki.md": {
+      "sha256": "abc123",
+      "ingested_at": "2026-06-12T10:00:00+08:00",
+      "wiki_page": "wiki/sources/karpathy-llm-wiki.md"
+    }
+  },
+  "last_query": {
+    "question": "LLM Wiki 和传统 RAG 有什么区别？",
+    "answered_at": "2026-06-12T10:30:00+08:00",
+    "context_pages": [
+      "wiki/sources/karpathy-llm-wiki.md",
+      "wiki/concepts/RAG.md"
+    ],
+    "answer": "DeepSeek 的完整回答文本",
+    "citations": [
+      "wiki/sources/karpathy-llm-wiki.md#关键观点",
+      "wiki/concepts/RAG.md#定义"
+    ]
+  }
+}
+```
+
+规则：
+
+- `sources` 记录摄入状态。
+- `last_query` 只保存最近一次 query，不保存完整历史。
+- `last_query.answer` 保存完整回答，方便 `propose` 使用。
+- 完整历史如果值得保留，必须通过 `propose -> apply` 进入 `wiki/queries/`。
+- `propose` 默认读取 `last_query.question`、`last_query.answer`、`last_query.context_pages` 和 `last_query.citations`。
+
+## `search_index.json` 结构
+
+`search_index.json` 是本地搜索索引，用来支持 `search` 和 `query`。第一版不依赖向量库，所以索引必须简单、透明、可检查。
+
+第一版结构：
+
+```json
+{
+  "version": 1,
+  "built_at": "2026-06-12T10:40:00+08:00",
+  "pages": [
+    {
+      "path": "wiki/concepts/LLM-Wiki.md",
+      "type": "concept",
+      "title": "LLM Wiki",
+      "headings": ["定义", "核心原则", "适用场景", "来源"],
+      "tags": ["llm", "knowledge-management"],
+      "wikilinks": ["RAG", "Embedding"],
+      "sources": ["wiki/sources/karpathy-llm-wiki.md"],
+      "text": "页面的纯文本内容..."
+    }
+  ]
+}
+```
+
+规则：
+
+- 索引保存完整页面纯文本，方便快速查询和调试。
+- `index` 命令从 `wiki/` 重新生成整个索引。
+- `search` 只读取索引，不直接扫描所有 Markdown。
+- 索引是派生产物，可以删除后重建。
+
+第一版搜索打分规则：
+
+- 标题命中：高分。
+- heading 命中：高分。
+- tag 命中：中高分。
+- wikilink 命中：中分。
+- 正文命中：基础分。
+
 ## CLI 命令设计
 
 ### `init`
