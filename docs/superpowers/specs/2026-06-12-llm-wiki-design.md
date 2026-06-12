@@ -136,6 +136,72 @@ LLM_Wiki_Demo/
 
 API Key 不能写入 `.llm-wiki/`。DeepSeek API Key 只通过环境变量 `DEEPSEEK_API_KEY` 读取。
 
+## `config.toml` 结构
+
+`.llm-wiki/config.toml` 只保存非敏感配置。它决定工具默认怎么调用 DeepSeek、一次 query 取多少上下文、ingest 摘要和分块的尺寸，以及 lint 健康检查的阈值。
+
+默认配置：
+
+```toml
+[llm]
+provider = "deepseek"
+base_url = "https://api.deepseek.com"
+model = "deepseek-chat"
+temperature = 0.2
+max_tokens = 4096
+context_limit = 10000
+
+[search]
+top_k = 5
+page_char_limit = 2000
+total_context_char_limit = 10000
+
+[ingest]
+short_doc_limit = 3000
+medium_doc_limit = 15000
+short_summary_limit = 800
+medium_summary_limit = 1500
+long_summary_limit = 2500
+chunk_min_chars = 2000
+chunk_max_chars = 4000
+
+[lint]
+pending_proposal_days = 7
+long_page_char_limit = 12000
+
+[language]
+default = "zh-CN"
+```
+
+字段含义：
+
+- `llm.provider`：LLM 服务商。第一版固定为 `deepseek`，先不抽象多服务商。
+- `llm.base_url`：DeepSeek OpenAI-compatible API 地址。
+- `llm.model`：默认模型，第一版使用 `deepseek-chat`。
+- `llm.temperature`：生成温度。默认 `0.2`，让摘要、问答和 proposal 更稳定。
+- `llm.max_tokens`：单次 API 返回的最大 token 数。
+- `llm.context_limit`：构造 prompt 时允许放入的上下文上限，用于避免 prompt 过长。
+- `search.top_k`：`search` 和 `query` 默认取回的候选页面数量。
+- `search.page_char_limit`：query 阶段从单个页面回读的最大字符数。
+- `search.total_context_char_limit`：query 阶段所有页面合计上下文的最大字符数。
+- `ingest.short_doc_limit`：短文档阈值。小于等于该值时直接生成短摘要。
+- `ingest.medium_doc_limit`：中等文档阈值。超过该值的文档进入长文档分块摘要流程。
+- `ingest.short_summary_limit`：短文档 source summary 的目标上限。
+- `ingest.medium_summary_limit`：中等文档 source summary 的目标上限。
+- `ingest.long_summary_limit`：长文档分块合成后的最终 summary 目标上限。
+- `ingest.chunk_min_chars`：Markdown-aware chunking 的目标最小块大小。
+- `ingest.chunk_max_chars`：Markdown-aware chunking 的目标最大块大小。
+- `lint.pending_proposal_days`：pending proposal 超过多少天后报告为需要 review。
+- `lint.long_page_char_limit`：页面超过多少字符后提示可能需要拆分。
+- `language.default`：默认输出语言。第一版固定中文优先，默认 `zh-CN`。
+
+配置规则：
+
+1. `DEEPSEEK_API_KEY` 不允许出现在 `config.toml` 中。
+2. `init` 创建默认 `config.toml` 时可以带隐藏 marker，但用户修改后不能被普通 `init` 覆盖。
+3. 缺少可选字段时使用内置默认值；字段类型错误时命令应清晰失败。
+4. 第一版不支持项目内存放多套 profile，避免配置复杂度超过 CLI 核心流程。
+
 ## Wiki 页面模型
 
 所有正式 wiki 页面统一使用 YAML frontmatter。这样页面仍然是普通 Markdown，人可以直接阅读和编辑；同时程序可以稳定读取页面类型、标题、来源、标签和状态。
@@ -1130,7 +1196,7 @@ edited_after_generation: true
 
 配置来源：
 
-- `DEEPSEEK_API_KEY`：必需环境变量。
+- `DEEPSEEK_API_KEY`：需要调用 DeepSeek 的命令必须读取该环境变量。`init` 是例外；缺少 API Key 时可以降级生成默认模板。
 - `.llm-wiki/config.toml`：模型名、base URL、温度、token 限制。
 
 Prompt 输入：
@@ -1301,7 +1367,7 @@ src/
 
 ## 错误处理
 
-- 缺少 `DEEPSEEK_API_KEY`：显示清晰错误并以非零状态退出。
+- 缺少 `DEEPSEEK_API_KEY`：对 `ingest`、`query`、`propose` 等必须调用 DeepSeek 的命令，显示清晰错误并以非零状态退出；`init` 按默认模板降级。
 - 缺少必要项目文件：提示用户运行 `init`。
 - proposal 格式错误：报告校验错误，不修改任何文件。
 - proposal 目标路径在 `wiki/` 外部：拒绝应用。
