@@ -858,6 +858,21 @@ DeepSeek 输出必须使用以下结构：
 - proposal 必须包含目标页面、操作类型、建议内容、理由和引用。
 - 向 `wiki/log.md` 追加 propose 记录。
 
+proposal 来源：
+
+- 来自最近一次 `query`：例如 `python -m llm_wiki propose "把刚才的问题沉淀进 wiki"`。
+- 来自用户明确指令：例如 `python -m llm_wiki propose "基于 wiki/sources/xxx.md 创建一个 RAG 概念页"`。
+
+生成规则：
+
+- `propose` 只能写入 `proposals/pending/`。
+- `propose` 不允许修改 `wiki/` 下的正式页面。
+- proposal 必须声明 `operation`，第一版只允许 `append_section` 和 `create_page`。
+- proposal 必须声明 `target`。
+- proposal 必须声明 `sources`。
+- proposal 必须写入 `proposal_sha256`，用于后续判断用户是否编辑过 proposal。
+- `propose` 成功后向 `wiki/log.md` 记录 proposal 路径、target、operation 和 sources。
+
 ### `apply <proposal-path>`
 
 应用人工确认过的 proposal。
@@ -872,6 +887,21 @@ DeepSeek 输出必须使用以下结构：
 - 向 `wiki/log.md` 追加 apply 记录。
 
 如果 proposal 格式错误、目标路径在 `wiki/` 外部、缺少引用，命令必须安全失败，不能修改正式 wiki。
+
+校验规则：
+
+- proposal frontmatter 必须存在。
+- `status` 必须是 `pending`。
+- `operation` 必须合法。
+- `target` 必须合法，不能逃逸出项目目录。
+- `sources` 必须非空。
+- `## Proposed Change` 或 `## 建议修改` 必须非空。
+- `## Citations` 或 `## 引用` 必须非空。
+- citations 中的路径必须存在。
+- `append_section` 的目标页面必须存在，并且包含 `## 来源`。
+- `create_page` 的目标页面不能已存在，并且 Proposed Change 必须是完整页面。
+
+用户可以在 `propose` 后手动编辑 `proposals/pending/xxx.md`。`apply` 必须重新计算当前 proposal hash，并记录 `edited_after_generation`。
 
 ### `lint`
 
@@ -898,9 +928,13 @@ status: pending
 created_at: 2026-06-12T10:00:00+08:00
 target: wiki/concepts/LLM Wiki.md
 operation: append_section
+page_type: concept
 sources:
   - wiki/sources/karpathy-llm-wiki.md
   - wiki/queries/llm-wiki-vs-rag.md
+generated_by: deepseek
+generated_at: 2026-06-12T10:00:00+08:00
+proposal_sha256: abc123
 ---
 
 # Proposal
@@ -929,6 +963,51 @@ sources:
 - `create_page`：创建一个新的 wiki 页面。
 
 替换式修改先不做，因为它需要更强的 diff 审阅机制。
+
+`append_section` 规则：
+
+- `apply` 将 `## Proposed Change` 或 `## 建议修改` 中的 Markdown 内容追加到目标页面的 `## 来源` 之前。
+- 如果目标页面缺少 `## 来源`，`apply` 拒绝执行。
+- `append_section` 不允许 LLM 指定任意插入位置。
+
+`create_page` 规则：
+
+- LLM 可以建议 `target`，但 `apply` 必须验证路径是否合法。
+- `concept` 只能创建在 `wiki/concepts/`。
+- `entity` 只能创建在 `wiki/entities/`。
+- `synthesis` 只能创建在 `wiki/synthesis/`。
+- `query` 只能创建在 `wiki/queries/`。
+- `source` 页面不能由普通 proposal 创建，只能由 `ingest` 创建。
+- `target` 文件已存在时，`apply` 拒绝执行。
+- `## Proposed Change` 必须包含完整页面内容，包括 frontmatter、一级标题和 `## 来源`。
+- Proposed Change 中 frontmatter 的 `type` 必须和 proposal 的 `page_type` 一致。
+
+proposal 可以由用户手动编辑，这是人工确认写回流程的一部分。`apply` 必须基于当前 proposal 文件内容执行，而不是基于 LLM 原始输出执行。
+
+为记录用户是否编辑过 proposal，`propose` 创建文件后必须写入 `proposal_sha256`。`apply` 前重新计算当前 proposal 内容 hash，并写入 `applied_sha256`。
+
+如果 `applied_sha256 != proposal_sha256`，说明 proposal 在生成后被用户编辑过。`apply` 成功后，移动到 `proposals/applied/` 的 proposal frontmatter 必须更新：
+
+```yaml
+status: applied
+applied_at: 2026-06-12T12:30:00+08:00
+applied_sha256: def456
+edited_after_generation: true
+```
+
+`wiki/log.md` 必须记录：
+
+```markdown
+- 2026-06-12T12:30:00+08:00 apply proposal
+  - proposal: proposals/applied/2026-06-12-llm-wiki-vs-rag.md
+  - target: wiki/concepts/LLM-Wiki.md
+  - operation: append_section
+  - edited_after_generation: true
+  - proposal_sha256: abc123
+  - applied_sha256: def456
+```
+
+如果用户没有编辑过 proposal，`edited_after_generation` 记录为 `false`。
 
 ## DeepSeek 集成
 
