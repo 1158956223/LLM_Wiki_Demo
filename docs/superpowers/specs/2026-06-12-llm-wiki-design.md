@@ -522,6 +522,66 @@ raw/sources/karpathy-llm-wiki.md
 - 不覆盖用户已有内容。
 - 向 `wiki/log.md` 追加 init 记录。
 
+第一版 `init` 是智能初始化命令。它优先使用 DeepSeek 根据项目名和项目描述生成初始内容；如果没有 API Key 或 API 调用失败，则降级为内置默认模板，不中断初始化。
+
+支持参数：
+
+```powershell
+python -m llm_wiki init --name "LLM_Wiki_Demo"
+python -m llm_wiki init --name "LLM_Wiki_Demo" --description "本项目用于构建本地 LLM Wiki"
+python -m llm_wiki init --no-llm
+python -m llm_wiki init --force
+```
+
+参数含义：
+
+- `--name`：项目名，用于生成 `purpose.md`、`schema.md` 和 `wiki/overview.md`。
+- `--description`：用户提供的一句话目标，帮助 DeepSeek 生成更贴近项目的初始化内容。
+- `--no-llm`：强制使用默认模板，不调用 DeepSeek。
+- `--force`：允许刷新工具生成的默认模板文件。
+
+DeepSeek 可用时，`init` 生成：
+
+- 定制版 `purpose.md`。
+- 定制版 `schema.md`。
+- 定制版 `wiki/overview.md`。
+
+DeepSeek 不可用时，`init` 降级生成：
+
+- 默认模板 `purpose.md`。
+- 默认模板 `schema.md`。
+- 默认模板 `wiki/overview.md`。
+
+降级不算失败，但必须写入 `wiki/log.md`：
+
+```text
+init completed with default templates because DeepSeek was unavailable
+```
+
+覆盖规则：
+
+1. 文件不存在：创建。
+2. 文件存在，并且包含工具模板 marker：`--force` 时可以覆盖。
+3. 文件存在，但不包含工具模板 marker：不覆盖，输出 warning。
+4. 没有 `--force` 时，任何已有文件都不覆盖。
+
+工具生成的模板文件必须包含隐藏 marker：
+
+```markdown
+<!-- llm-wiki:template=purpose:v1 -->
+```
+
+不同文件使用不同 marker：
+
+```text
+purpose.md        -> <!-- llm-wiki:template=purpose:v1 -->
+schema.md         -> <!-- llm-wiki:template=schema:v1 -->
+wiki/overview.md  -> <!-- llm-wiki:template=overview:v1 -->
+wiki/index.md     -> <!-- llm-wiki:template=index:v1 -->
+```
+
+如果用户手动编辑文件后希望保护内容，可以删除 marker。工具看到 marker 缺失时，即使传入 `--force`，也不会覆盖该文件。
+
 ### `ingest <path>`
 
 摄入一个 Markdown 文件，或摄入一个包含 Markdown 文件的目录。
@@ -535,6 +595,107 @@ raw/sources/karpathy-llm-wiki.md
 - 更新 `wiki/index.md`。
 - 更新 `.llm-wiki/state.json`。
 - 向 `wiki/log.md` 追加 ingest 记录。
+
+第一版 `ingest` 只做 LLM 辅助摄入，不提供无 LLM 降级。进入 `wiki/` 的 source summary 必须经过 DeepSeek 加工。如果 DeepSeek 不可用，摄入失败。
+
+支持命令：
+
+```powershell
+python -m llm_wiki ingest raw/sources/example.md
+python -m llm_wiki ingest raw/sources/
+python -m llm_wiki ingest raw/sources/example.md --force
+```
+
+规则：
+
+1. 输入路径必须位于 `raw/sources/` 下。
+2. 输入必须是 `.md` 文件，或包含 `.md` 文件的目录。
+3. 缺少 `DEEPSEEK_API_KEY` 时失败。
+4. DeepSeek API 调用失败时失败。
+5. LLM 输出缺少 frontmatter 时失败。
+6. LLM 输出缺少 `## 来源` 时失败。
+7. LLM 输出的来源路径不是当前原始文件路径时失败。
+8. 普通模式下，如果原始文件 hash 未变化，则跳过。
+9. `--force` 会忽略 hash，重新调用 DeepSeek。
+
+流程：
+
+```text
+接收 path
+  -> 确认路径在 raw/sources/ 下
+  -> 确认是 .md 文件或目录
+  -> 计算 sha256
+  -> 如果 hash 未变化且没有 --force，则跳过
+  -> 读取原始 Markdown
+  -> 按 Markdown 结构分块
+  -> 调用 DeepSeek 生成 source summary
+  -> 校验 source summary
+  -> 写入新 source 页面，或为已有 source 页面生成 proposal
+  -> 更新 state.json
+  -> 更新 wiki/index.md
+  -> 追加 wiki/log.md
+  -> 重建 search_index.json
+```
+
+写入规则：
+
+- 如果目标 `wiki/sources/<source-file-name>.md` 不存在，摄入成功后直接创建。
+- 如果目标 source 页面已存在，不直接覆盖，而是生成 `proposals/pending/` 下的更新 proposal。
+- 用户确认 proposal 后，才通过 `apply` 修改已有 source 页面。
+
+已存在 source 页面时，`state.json` 不应直接标记新 hash 为成功摄入，而是记录 pending proposal：
+
+```json
+{
+  "sources": {
+    "raw/sources/example.md": {
+      "sha256": "oldhash",
+      "ingested_at": "2026-06-12T10:00:00+08:00",
+      "wiki_page": "wiki/sources/example.md",
+      "pending_proposal": {
+        "path": "proposals/pending/2026-06-12-update-source-example.md",
+        "sha256": "newhash",
+        "created_at": "2026-06-12T11:00:00+08:00"
+      }
+    }
+  }
+}
+```
+
+source summary 采用自适应摘要策略：
+
+- 短文档：中文 3000 字以内，summary 最多约 800 字。
+- 中等文档：中文 3000-15000 字，summary 最多约 1500 字。
+- 长文档：中文 15000 字以上，先分块摘要，再合成总摘要；最终 source page 最多约 2500 字。
+
+LLM 输出结构必须符合 source 页面模板：
+
+```markdown
+# Source Title
+
+## 摘要
+
+## 关键观点
+
+## 可沉淀概念
+
+## 涉及实体
+
+## 引用片段
+
+## 来源
+
+- `raw/sources/example.md`
+```
+
+长 Markdown 使用 Markdown-aware 分块策略：
+
+1. 一级标题作为大边界。
+2. 二级标题作为主要 chunk 边界。
+3. 保持代码块完整，不从代码块中间切开。
+4. 单块目标 2000-4000 中文字符。
+5. 超长章节再按段落切分。
+6. 每块保留 heading path，例如 `# LLM Wiki / ## 核心思想 / ### Writeback`。
 
 ### `index`
 
