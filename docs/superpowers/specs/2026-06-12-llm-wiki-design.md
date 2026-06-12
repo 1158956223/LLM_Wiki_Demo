@@ -1149,6 +1149,156 @@ Prompt 要求：
 - 不能编造不存在的来源路径。
 - 生成 proposal 时，只能修改声明的目标页面，并保持 Markdown 可读。
 
+## 技术模块结构
+
+第一版使用 Python 实现 CLI。源码放在 `src/llm_wiki/` 下，按入口层、基础设施层、Markdown 层和业务模块拆分。
+
+目录结构：
+
+```text
+src/
+  llm_wiki/
+    __init__.py
+    __main__.py
+    cli.py
+
+    paths.py
+    config.py
+    state.py
+    log.py
+
+    markdown.py
+    templates.py
+    naming.py
+
+    deepseek.py
+    ingest.py
+    search.py
+    query.py
+    proposal.py
+    lint.py
+
+    errors.py
+```
+
+### 入口层
+
+`__main__.py`
+
+- 支持 `python -m llm_wiki ...`。
+- 只负责调用 `cli.py`。
+
+`cli.py`
+
+- 定义命令行参数和子命令。
+- 子命令包括 `init`、`ingest`、`index`、`search`、`query`、`propose`、`apply`、`lint`。
+- 不包含核心业务逻辑，只把参数转交给对应业务模块。
+
+### 基础设施层
+
+`paths.py`
+
+- 集中管理项目路径。
+- 提供 `purpose.md`、`schema.md`、`wiki/index.md`、`wiki/log.md`、`.llm-wiki/state.json`、`.llm-wiki/search.sqlite` 等路径。
+- 负责安全解析项目内相对路径，防止路径逃逸。
+
+`config.py`
+
+- 读取 `.llm-wiki/config.toml`。
+- 读取环境变量 `DEEPSEEK_API_KEY`。
+- 提供 DeepSeek `base_url`、`model`、`temperature`、`context_limit` 等配置。
+
+`state.py`
+
+- 读写 `.llm-wiki/state.json`。
+- 管理 `sources`、`last_query`、`pending_proposal` 等状态。
+- 写入时保持 JSON 格式稳定，便于调试和测试。
+
+`log.py`
+
+- 向 `wiki/log.md` 追加结构化日志。
+- 记录 init、ingest、index、query、propose、apply、lint 的关键字段。
+
+`errors.py`
+
+- 定义项目异常。
+- 典型异常包括 `ProjectNotInitializedError`、`DeepSeekUnavailableError`、`InvalidProposalError`、`UnsafePathError`。
+
+### Markdown 层
+
+`markdown.py`
+
+- 解析 YAML frontmatter。
+- 提取一级标题、heading 列表、wikilink、`## 来源`。
+- 将 Markdown 转为纯文本。
+- 按 heading 提取 section。
+- 实现 Markdown-aware chunking。
+
+`templates.py`
+
+- 存放内置模板。
+- 包括 `purpose.md`、`schema.md`、`wiki/index.md`、`wiki/overview.md`、五类页面模板和 proposal 模板。
+
+`naming.py`
+
+- 实现文件名 slug 生成。
+- 保留中文、英文和数字。
+- 空白转 `-`。
+- 移除 Windows 非法字符。
+- 重名时追加 6 位短 hash。
+
+### 业务模块
+
+`deepseek.py`
+
+- 封装 DeepSeek API。
+- 提供 chat completion 调用。
+- 支持 init 内容生成、ingest summary 生成、query answer 生成和 proposal 生成。
+- 所有测试必须 mock 这个模块，避免真实 API 调用进入单元测试。
+
+`ingest.py`
+
+- 实现 Markdown 摄入。
+- 校验 raw source 路径。
+- 计算 hash。
+- 调用 Markdown-aware chunking。
+- 调用 DeepSeek 生成 source summary。
+- 写入新 source 页面，或为已有 source 页面生成 proposal。
+- 更新 state、index 和 log。
+
+`search.py`
+
+- 实现 SQLite FTS5 + trigram 搜索。
+- 创建 `.llm-wiki/search.sqlite`。
+- 检测 FTS5 和 trigram tokenizer 支持。
+- 扫描 wiki 页面并重建索引。
+- 执行 `search` 查询并返回 top_k 结果。
+
+`query.py`
+
+- 实现问答流程。
+- 调用 `search.py` 获取候选页面。
+- 回读 Markdown 上下文。
+- 构造 DeepSeek prompt。
+- 写入 `state.json.last_query`。
+- 追加 query log。
+
+`proposal.py`
+
+- 实现 `propose` 和 `apply`。
+- 生成 proposal。
+- 校验 proposal。
+- 实现 `append_section` 和 `create_page`。
+- 计算 `proposal_sha256` 和 `applied_sha256`。
+- 移动 pending/applied/rejected proposal。
+- 记录 `edited_after_generation`。
+
+`lint.py`
+
+- 实现四类 lint：structure、navigation、source traceability、knowledge health。
+- 支持普通文本输出、`--json` 和 `--write-review`。
+- `lint` 不直接修改 `wiki/`、`raw/` 或 `proposals/`。
+
 ## 错误处理
 
 - 缺少 `DEEPSEEK_API_KEY`：显示清晰错误并以非零状态退出。
