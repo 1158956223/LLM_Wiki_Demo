@@ -1,0 +1,19 @@
+# IDE / editor
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local secrets and runtime state
+.env
+.llm-wiki/
