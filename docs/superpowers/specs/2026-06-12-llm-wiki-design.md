@@ -776,6 +776,76 @@ LLM 输出结构必须符合 source 页面模板：
 
 第一版的 `query` 不会自动写入 wiki。
 
+详细流程：
+
+```text
+读取 purpose.md
+  -> 读取 schema.md
+  -> 读取 wiki/index.md
+  -> 用 SQLite FTS5 搜索相关页面
+  -> 取 top_k 页面片段
+  -> 回读完整 Markdown 页面或相关 heading 段落
+  -> 构造 DeepSeek prompt
+  -> 要求回答必须基于给定上下文
+  -> 输出答案和引用
+  -> 写入 state.json.last_query
+  -> 追加 wiki/log.md
+```
+
+上下文选择策略：
+
+- 默认取 top 5 个相关页面。
+- 每页最多取 2000 中文字符左右。
+- 总上下文最多 8000-10000 中文字符左右。
+- 如果页面太长，优先保留 frontmatter、一级标题、命中 heading 附近段落和 `## 来源`。
+- 不能只把 SQLite `snippet()` 结果交给 DeepSeek；`snippet()` 用于定位命中位置，query 阶段仍要回读 Markdown 上下文。
+
+Prompt 结构：
+
+```text
+System:
+你是本地 LLM Wiki 的问答助手。只能根据给定 wiki context 回答。
+如果证据不足，明确说证据不足。不能编造来源。
+
+Purpose:
+<purpose.md>
+
+Schema Rules:
+<schema.md 中和引用、页面规则有关的部分>
+
+Wiki Context:
+<检索到的页面片段，必须带 path>
+
+User Question:
+<用户问题>
+```
+
+DeepSeek 输出必须使用以下结构：
+
+```markdown
+## 回答
+
+...
+
+## 依据
+
+- `wiki/sources/xxx.md#某标题`
+- `wiki/concepts/yyy.md#某标题`
+
+## 证据不足或待确认
+
+无明显不足。
+```
+
+如果证据不足，`## 回答` 中应明确说明无法从当前 wiki 得出可靠结论，`## 证据不足或待确认` 中列出缺失信息。
+
+`state.json.last_query` 写入规则：
+
+- API 调用失败：不写成功的 `last_query`。
+- 检索结果为空：不调用 DeepSeek，直接输出“wiki 中没有足够上下文”，追加 log，不写 `last_query`。
+- DeepSeek 正常返回“证据不足”：写入 `last_query`，因为这是一次有效回答。
+- 成功回答：写入完整 `question`、`answered_at`、`context_pages`、`answer` 和 `citations`。
+
 ### `propose <instruction>`
 
 基于最近一次 query 或用户明确指令，生成待审阅的写回建议。
