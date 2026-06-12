@@ -61,7 +61,7 @@ class CliParserTests(unittest.TestCase):
 
 - [x] **步骤 3：实现最小包结构和解析器**
 
-`pyproject.toml` 声明包元数据和测试路径。`__main__.py` 调用 `cli.main()`。`cli.py` 暴露 `build_parser()` 和 `main()`，支持 `init --name --description --no-llm --force`。
+`pyproject.toml` 声明包元数据。`__main__.py` 调用 `cli.main()`。`cli.py` 暴露 `build_parser()` 和 `main()`，支持 `init --name --path --description --no-llm --force`。其中 `--name` 表示 wiki 显示名称，`--path` 表示初始化目标目录；不传 `--path` 时默认初始化当前工作目录。
 
 - [x] **步骤 4：运行测试确认通过**
 
@@ -186,7 +186,7 @@ from llm_wiki.init import initialize_project
 
 - [x] **步骤 4：把 CLI 接到 `initialize_project`**
 
-`python -m llm_wiki init --no-llm` 应该初始化当前工作目录，并打印简短的 created/skipped 摘要。
+`python -m llm_wiki init --no-llm` 应该初始化当前工作目录，并打印简短的 created/skipped 摘要。`python -m llm_wiki init --path "D:\tmp\我的 Wiki" --name "我的 Wiki" --no-llm` 应该先创建目标目录，再把 wiki 文件写入该目录。
 
 - [x] **步骤 5：运行相关测试**
 

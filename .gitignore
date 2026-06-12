@@ -17,3 +17,5 @@ env/
 # Local secrets and runtime state
 .env
 .llm-wiki/
+
+tests/
