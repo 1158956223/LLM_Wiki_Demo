@@ -83,7 +83,7 @@ LLM_Wiki_Demo/
   .llm-wiki/
     config.toml
     state.json
-    search_index.json
+    search.sqlite
 
   src/
     llm_wiki/
@@ -132,7 +132,7 @@ LLM_Wiki_Demo/
 
 - `config.toml`：非敏感配置，例如模型名、base URL、温度、路径设置。
 - `state.json`：已摄入文件 hash、源文件到 wiki 页面的映射、最近一次 query 元数据。
-- `search_index.json`：由 Markdown 文件生成的本地搜索索引。
+- `search.sqlite`：由 Markdown 文件生成的本地 SQLite FTS5 搜索索引。
 
 API Key 不能写入 `.llm-wiki/`。DeepSeek API Key 只通过环境变量 `DEEPSEEK_API_KEY` 读取。
 
@@ -468,45 +468,83 @@ raw/sources/karpathy-llm-wiki.md
 - 完整历史如果值得保留，必须通过 `propose -> apply` 进入 `wiki/queries/`。
 - `propose` 默认读取 `last_query.question`、`last_query.answer`、`last_query.context_pages` 和 `last_query.citations`。
 
-## `search_index.json` 结构
+## `search.sqlite` 结构
 
-`search_index.json` 是本地搜索索引，用来支持 `search` 和 `query`。第一版不依赖向量库，所以索引必须简单、透明、可检查。
+`search.sqlite` 是本地搜索索引，用来支持 `search` 和 `query`。第一版不依赖向量库，而是使用 SQLite FTS5 + trigram tokenizer 做可解释的本地全文检索。
 
-第一版结构：
+SQLite FTS5 是 SQLite 的全文检索扩展，支持 `MATCH` 查询、BM25 排序、`snippet()` 摘要片段和 `highlight()` 高亮。trigram tokenizer 会把文本切成连续三字符片段，适合中文和中英混合内容的子串匹配。
+
+第一版索引库位置：
+
+```text
+.llm-wiki/search.sqlite
+```
+
+核心 FTS 表：
+
+```sql
+CREATE VIRTUAL TABLE pages_fts USING fts5(
+  path UNINDEXED,
+  type UNINDEXED,
+  title,
+  headings,
+  tags,
+  wikilinks,
+  sources,
+  text,
+  tokenize = 'trigram'
+);
+```
+
+每个 wiki 页面对应一条记录：
 
 ```json
 {
-  "version": 1,
-  "built_at": "2026-06-12T10:40:00+08:00",
-  "pages": [
-    {
-      "path": "wiki/concepts/LLM-Wiki.md",
-      "type": "concept",
-      "title": "LLM Wiki",
-      "headings": ["定义", "核心原则", "适用场景", "来源"],
-      "tags": ["llm", "knowledge-management"],
-      "wikilinks": ["RAG", "Embedding"],
-      "sources": ["wiki/sources/karpathy-llm-wiki.md"],
-      "text": "页面的纯文本内容..."
-    }
-  ]
+  "path": "wiki/concepts/LLM-Wiki.md",
+  "type": "concept",
+  "title": "LLM Wiki",
+  "headings": ["定义", "核心原则", "适用场景", "来源"],
+  "tags": ["llm", "knowledge-management"],
+  "wikilinks": ["RAG", "Embedding"],
+  "sources": ["wiki/sources/karpathy-llm-wiki.md"],
+  "text": "页面的纯文本内容..."
 }
 ```
 
 规则：
 
-- 索引保存完整页面纯文本，方便快速查询和调试。
+- 索引保存完整页面纯文本，方便快速查询、snippet 生成和调试。
 - `index` 命令从 `wiki/` 重新生成整个索引。
-- `search` 只读取索引，不直接扫描所有 Markdown。
+- `search` 只查询 SQLite FTS5 索引，不直接扫描所有 Markdown。
 - 索引是派生产物，可以删除后重建。
+- 实现时必须检测当前 Python 的 SQLite 是否支持 FTS5 和 trigram tokenizer。
+- 如果 SQLite 不支持 FTS5 或 trigram，`index` 应该清晰失败，并提示用户当前 Python/SQLite 环境不满足要求。
 
-第一版搜索打分规则：
+第一版搜索查询示例：
 
-- 标题命中：高分。
-- heading 命中：高分。
-- tag 命中：中高分。
-- wikilink 命中：中分。
-- 正文命中：基础分。
+```sql
+SELECT
+  path,
+  type,
+  title,
+  snippet(pages_fts, -1, '[', ']', '...', 20) AS snippet,
+  bm25(pages_fts, 8.0, 1.0, 5.0, 4.0, 2.0, 1.0, 1.0) AS score
+FROM pages_fts
+WHERE pages_fts MATCH ?
+ORDER BY score
+LIMIT 10;
+```
+
+字段权重：
+
+- `title`：8.0
+- `headings`：5.0
+- `tags`：4.0
+- `wikilinks`：2.0
+- `sources`：1.0
+- `text`：1.0
+
+注意：SQLite FTS5 的 `bm25()` 返回值越小，匹配越好，所以结果按 `score ASC` 排序。
 
 ## CLI 命令设计
 
@@ -518,7 +556,7 @@ raw/sources/karpathy-llm-wiki.md
 
 - 创建 `purpose.md`、`schema.md`、`raw/sources/`、`wiki/`、`proposals/`、`.llm-wiki/`。
 - 创建初始的 `wiki/index.md`、`wiki/log.md`、`wiki/overview.md`。
-- 创建 `.llm-wiki/config.toml`、`.llm-wiki/state.json`、`.llm-wiki/search_index.json`。
+- 创建 `.llm-wiki/config.toml`、`.llm-wiki/state.json`、`.llm-wiki/search.sqlite`。
 - 不覆盖用户已有内容。
 - 向 `wiki/log.md` 追加 init 记录。
 
@@ -634,7 +672,7 @@ python -m llm_wiki ingest raw/sources/example.md --force
   -> 更新 state.json
   -> 更新 wiki/index.md
   -> 追加 wiki/log.md
-  -> 重建 search_index.json
+  -> 重建 search.sqlite
 ```
 
 写入规则：
@@ -705,7 +743,7 @@ LLM 输出结构必须符合 source 页面模板：
 
 - 扫描 `wiki/` 下的 Markdown 页面。
 - 提取标题、标题层级、wikilink、来源引用和正文片段。
-- 写入 `.llm-wiki/search_index.json`。
+- 写入 `.llm-wiki/search.sqlite`。
 - 向 `wiki/log.md` 追加 index 记录。
 
 第一版使用确定性的本地搜索：标题匹配、heading 匹配、精确词匹配、简单 token 重叠和 wikilink 匹配。向量检索以后可以加入，但不作为第一版的核心依赖。
@@ -716,7 +754,7 @@ LLM 输出结构必须符合 source 页面模板：
 
 职责：
 
-- 读取 `.llm-wiki/search_index.json`。
+- 查询 `.llm-wiki/search.sqlite`。
 - 返回匹配页面和片段。
 - 展示文件路径和分数。
 
@@ -760,7 +798,7 @@ LLM 输出结构必须符合 source 页面模板：
 - 只修改 proposal 中声明的目标 wiki 页面。
 - 将 proposal 从 `pending` 移动到 `applied`。
 - 更新 `wiki/index.md`。
-- 重建 `.llm-wiki/search_index.json`。
+- 重建 `.llm-wiki/search.sqlite`。
 - 向 `wiki/log.md` 追加 apply 记录。
 
 如果 proposal 格式错误、目标路径在 `wiki/` 外部、缺少引用，命令必须安全失败，不能修改正式 wiki。
