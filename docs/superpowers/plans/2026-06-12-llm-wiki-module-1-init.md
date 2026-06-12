@@ -6,7 +6,7 @@
 
 **架构：** CLI 入口保持很薄，只解析目标路径并询问项目名称与描述。确定性逻辑放在小模块中：`init` 负责创建项目目录结构、写入初始化内容、初始化配置/状态/搜索索引占位文件，并向 `wiki/log.md` 追加人类可读日志。DeepSeek 可用时生成 `purpose.md`、`schema.md` 和 `wiki/overview.md`；不可用时降级为内置模板。
 
-**技术栈：** Python 标准库、`argparse`、`dataclasses`、`json`、轻量 TOML 读取逻辑、`unittest`。当前本机环境是 Python 3.10，因此不依赖 Python 3.11 才有的 `tomllib`。测试文件只用于本地验证，不随本模块提交上传。
+**技术栈：** Python 标准库、`argparse`、`dataclasses`、`json`、轻量 TOML 读取逻辑、`unittest`、`langchain_openai.ChatOpenAI`。当前本机环境是 Python 3.10，因此不依赖 Python 3.11 才有的 `tomllib`。测试文件只用于本地验证，不随本模块提交上传。
 
 ---
 
@@ -17,7 +17,7 @@
 - 包入口：`src/llm_wiki/__init__.py`、`src/llm_wiki/__main__.py`、`src/llm_wiki/cli.py`
 - 基础设施：`paths.py`、`config.py`、`state.py`、`log.py`、`errors.py`
 - 模板与初始化行为：`templates.py`、`init.py`
-- DeepSeek 初始化内容生成：`deepseek.py`
+- DeepSeek 初始化内容生成：`deepseek.py`，通过 LangChain 的 `ChatOpenAI` 调用 DeepSeek OpenAI-compatible API。
 - 包配置：`pyproject.toml`
 - 本地验证文件：`tests/test_cli.py`、`tests/test_init.py`、`tests/test_paths.py`、`tests/test_config_state_log.py`。这些文件只保留在本地，不提交到远端仓库。
 

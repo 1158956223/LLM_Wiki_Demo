@@ -1191,7 +1191,7 @@ edited_after_generation: true
 
 ## DeepSeek 集成
 
-项目通过 OpenAI-compatible chat completion API 调用 DeepSeek。
+项目通过 LangChain 的 OpenAI-compatible chat model 调用 DeepSeek。第一版使用 `langchain_openai.ChatOpenAI`，并把 `base_url` 指向 DeepSeek API。
 
 配置来源：
 
@@ -1316,8 +1316,8 @@ src/
 
 `deepseek.py`
 
-- 封装 DeepSeek API。
-- 提供 chat completion 调用。
+- 使用 LangChain 封装 DeepSeek API。
+- 通过 `langchain_openai.ChatOpenAI` 提供 chat completion 调用。
 - 支持 init 内容生成、ingest summary 生成、query answer 生成和 proposal 生成。
 - 所有测试必须 mock 这个模块，避免真实 API 调用进入单元测试。
 

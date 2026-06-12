@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import os
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
+from typing import Any, Callable
+
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
 
 from .config import AppConfig, DEFAULT_CONFIG
 from .errors import DeepSeekUnavailableError
@@ -15,6 +17,7 @@ from .init import InitContent
 class DeepSeekClient:
     api_key: str
     config: AppConfig = DEFAULT_CONFIG
+    chat_model_factory: Callable[[], Any] | None = None
 
     @classmethod
     def from_environment(cls, config: AppConfig = DEFAULT_CONFIG) -> "DeepSeekClient":
@@ -25,32 +28,30 @@ class DeepSeekClient:
 
     def generate_init_content(self, name: str, description: str) -> InitContent:
         prompt = _build_init_prompt(name, description)
-        payload = {
-            "model": self.config.llm.model,
-            "temperature": self.config.llm.temperature,
-            "max_tokens": self.config.llm.max_tokens,
-            "messages": [
-                {"role": "system", "content": "你是本地 Markdown LLM Wiki 初始化助手。只输出 JSON。"},
-                {"role": "user", "content": prompt},
-            ],
-        }
-        request = urllib.request.Request(
-            f"{self.config.llm.base_url.rstrip('/')}/chat/completions",
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
+        model = self._chat_model()
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                data = json.loads(response.read().decode("utf-8"))
-        except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+            response = model.invoke(
+                [
+                    SystemMessage(content="你是本地 Markdown LLM Wiki 初始化助手。只输出 JSON。"),
+                    HumanMessage(content=prompt),
+                ]
+            )
+        except Exception as exc:
             raise DeepSeekUnavailableError(f"DeepSeek init generation failed: {exc}") from exc
 
-        content = data["choices"][0]["message"]["content"]
-        return _parse_init_content(content)
+        return _parse_init_content(str(response.content))
+
+    def _chat_model(self) -> Any:
+        if self.chat_model_factory is not None:
+            return self.chat_model_factory()
+        return ChatOpenAI(
+            api_key=self.api_key,
+            base_url=self.config.llm.base_url,
+            model=self.config.llm.model,
+            temperature=self.config.llm.temperature,
+            max_completion_tokens=self.config.llm.max_tokens,
+            timeout=30,
+        )
 
 
 def generate_init_content_with_deepseek(name: str, description: str) -> InitContent:
