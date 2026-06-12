@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
+from .deepseek import generate_init_content_with_deepseek
+from .init import InitContent
 from .init import initialize_project
 
 
@@ -12,29 +14,32 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     init_parser = subparsers.add_parser("init", help="initialize an LLM Wiki project")
-    init_parser.add_argument("--name")
     init_parser.add_argument("--path", type=Path)
-    init_parser.add_argument("--description")
-    init_parser.add_argument("--no-llm", action="store_true")
-    init_parser.add_argument("--force", action="store_true")
 
     return parser
 
 
-def main(argv: Sequence[str] | None = None, *, cwd: Path | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    cwd: Path | None = None,
+    input_func: Callable[[str], str] = input,
+    init_content_generator: Callable[[str, str], InitContent] | None = None,
+) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     root = cwd or Path.cwd()
 
     if args.command == "init":
         target_root = args.path or root
-        name = args.name or target_root.name
+        name = _prompt_required(input_func, "这个 Wiki 项目叫什么？")
+        description = _prompt_required(input_func, "请用一句话描述这个项目：")
+        generator = init_content_generator or generate_init_content_with_deepseek
         result = initialize_project(
             target_root,
             name=name,
-            description=args.description,
-            use_llm=not args.no_llm,
-            force=args.force,
+            description=description,
+            init_content_generator=generator,
         )
         print(f"init completed: created={len(result.created)} skipped={len(result.skipped)}")
         for warning in result.warnings:
@@ -42,3 +47,11 @@ def main(argv: Sequence[str] | None = None, *, cwd: Path | None = None) -> int:
         return 0
 
     return 0
+
+
+def _prompt_required(input_func: Callable[[str], str], prompt: str) -> str:
+    while True:
+        value = input_func(f"{prompt} ").strip()
+        if value:
+            return value
+        print("不能为空，请重新输入。")

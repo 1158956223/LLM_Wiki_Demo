@@ -631,18 +631,18 @@ LIMIT 10;
 支持参数：
 
 ```powershell
-python -m llm_wiki init --name "LLM_Wiki_Demo"
-python -m llm_wiki init --name "LLM_Wiki_Demo" --description "本项目用于构建本地 LLM Wiki"
-python -m llm_wiki init --no-llm
-python -m llm_wiki init --force
+python -m llm_wiki init
+python -m llm_wiki init --path "D:\Wiki\我的 Wiki"
 ```
 
 参数含义：
 
-- `--name`：项目名，用于生成 `purpose.md`、`schema.md` 和 `wiki/overview.md`。
-- `--description`：用户提供的一句话目标，帮助 DeepSeek 生成更贴近项目的初始化内容。
-- `--no-llm`：强制使用默认模板，不调用 DeepSeek。
-- `--force`：允许刷新工具生成的默认模板文件。
+- `--path`：初始化目标目录。不传时使用当前工作目录；传入时会先创建目标目录，再把 wiki 文件写入该目录。
+
+交互式输入：
+
+- 项目名：用于生成 `purpose.md`、`schema.md`、`wiki/index.md` 和 `wiki/overview.md`。
+- 项目描述：用户提供的一句话目标，帮助 DeepSeek 生成更贴近项目的初始化内容。
 
 DeepSeek 可用时，`init` 生成：
 
@@ -665,9 +665,8 @@ init completed with default templates because DeepSeek was unavailable
 覆盖规则：
 
 1. 文件不存在：创建。
-2. 文件存在，并且包含工具模板 marker：`--force` 时可以覆盖。
-3. 文件存在，但不包含工具模板 marker：不覆盖，输出 warning。
-4. 没有 `--force` 时，任何已有文件都不覆盖。
+2. 文件存在：不覆盖，输出 skipped 或 warning。
+3. 第一版不提供覆盖参数；如果用户需要重新初始化，应先手动删除目标文件或换一个空目录。
 
 工具生成的模板文件必须包含隐藏 marker：
 
@@ -684,7 +683,7 @@ wiki/overview.md  -> <!-- llm-wiki:template=overview:v1 -->
 wiki/index.md     -> <!-- llm-wiki:template=index:v1 -->
 ```
 
-如果用户手动编辑文件后希望保护内容，可以删除 marker。工具看到 marker 缺失时，即使传入 `--force`，也不会覆盖该文件。
+如果用户手动编辑文件后希望保护内容，可以删除 marker。第一版不会覆盖已有文件，marker 主要用于标识工具生成内容。
 
 ### `ingest <path>`
 
