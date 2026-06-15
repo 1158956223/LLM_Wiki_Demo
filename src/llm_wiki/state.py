@@ -16,3 +16,8 @@ def load_state(path: Path) -> dict[str, Any]:
     if not path.exists():
         return dict(INITIAL_STATE)
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def write_state(path: Path, state: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
