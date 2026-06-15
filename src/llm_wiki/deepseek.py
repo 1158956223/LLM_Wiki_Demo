@@ -59,21 +59,20 @@ def generate_init_content_with_deepseek(name: str, description: str) -> InitCont
 
 
 def _build_init_prompt(name: str, description: str) -> str:
-    return f"""请为一个本地优先、Markdown 优先的 LLM Wiki 项目生成初始化文档。
+    return f"""请为一个本地优先、Markdown 优先的 LLM Wiki 项目生成初始化 purpose.md。
 
 项目名称：{name}
 项目描述：{description}
 
 请只输出 JSON，格式如下：
 {{
-  "purpose": "完整 purpose.md Markdown 内容",
-  "schema": "完整 schema.md Markdown 内容",
-  "overview": "完整 wiki/overview.md Markdown 内容"
+  "purpose": "完整 purpose.md Markdown 内容"
 }}
 
 要求：
 - 使用中文。
 - 内容应简洁、可读、适合长期维护。
+- purpose.md 应描述项目目标、关键问题、范围、非范围和当前工作假设。
 - 不要输出 Markdown 代码围栏。
 """
 
@@ -87,8 +86,6 @@ def _parse_init_content(content: str) -> InitContent:
         data = json.loads(text)
         return InitContent(
             purpose=str(data["purpose"]),
-            schema=str(data["schema"]),
-            overview=str(data["overview"]),
         )
     except (KeyError, TypeError, json.JSONDecodeError) as exc:
         raise DeepSeekUnavailableError("DeepSeek returned invalid init content") from exc

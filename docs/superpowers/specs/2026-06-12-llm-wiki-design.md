@@ -99,7 +99,7 @@ LLM_Wiki_Demo/
 
 ### `schema.md`
 
-定义 wiki 的维护规则。它描述页面类型、命名规则、frontmatter 字段、引用格式、链接风格、proposal 格式等。DeepSeek 生成回答或 proposal 时要遵守这些规则。
+定义 wiki 的固定维护协议。它描述页面类型、命名规则、frontmatter 字段、引用格式、链接风格、proposal 格式等。这个文件由程序模板生成，不由 DeepSeek 按项目定制；DeepSeek 生成回答或 proposal 时要遵守这些规则。
 
 ### `raw/sources/`
 
@@ -109,9 +109,9 @@ LLM_Wiki_Demo/
 
 存放长期知识层，也是人主要阅读和编辑的地方。
 
-- `wiki/index.md`：导航入口，列出重要页面、摘要、页面类型和来源覆盖情况。
+- `wiki/index.md`：导航入口，按页面类型列出已摄入或已应用的 wiki 页面。init 阶段只创建空壳，真正内容在 ingest/apply 后更新。
 - `wiki/log.md`：追加式操作日志，记录 init、ingest、index、query、propose、apply、lint。
-- `wiki/overview.md`：当前知识库的整体概览。
+- `wiki/overview.md`：当前知识库的整体概览。init 阶段只创建占位页，真正内容在 ingest/apply 后根据已有 wiki 页面更新。
 - `wiki/sources/`：由原始资料生成的资料摘要页。
 - `wiki/concepts/`：概念页，例如 `RAG.md`、`Embedding.md`、`LLM Wiki.md`。
 - `wiki/entities/`：实体页，例如人物、项目、工具、模型、公司或论文。
@@ -225,7 +225,7 @@ status: active
 
 字段含义：
 
-- `type`：页面类型。第一版支持 `source`、`concept`、`entity`、`synthesis`、`query`。
+- `type`：页面类型。第一版支持 `source`、`concept`、`entity`、`query`、`synthesis`。
 - `title`：页面标题，应该和一级标题保持一致。
 - `created_at`：页面创建日期。
 - `updated_at`：页面最近更新时间。
@@ -626,7 +626,7 @@ LIMIT 10;
 - 不覆盖用户已有内容。
 - 向 `wiki/log.md` 追加 init 记录。
 
-第一版 `init` 是智能初始化命令。它优先使用 DeepSeek 根据项目名和项目描述生成初始内容；如果没有 API Key 或 API 调用失败，则降级为内置默认模板，不中断初始化。
+第一版 `init` 是交互式初始化命令。它优先使用 DeepSeek 根据项目名和项目描述生成 `purpose.md`；如果没有 API Key 或 API 调用失败，则降级为内置默认模板，不中断初始化。`schema.md` 是固定系统协议，`wiki/index.md` 和 `wiki/overview.md` 在 init 阶段只创建空壳，真正内容等 ingest/apply 后更新。
 
 支持参数：
 
@@ -641,20 +641,20 @@ python -m llm_wiki init --path "D:\Wiki\我的 Wiki"
 
 交互式输入：
 
-- 项目名：用于生成 `purpose.md`、`schema.md`、`wiki/index.md` 和 `wiki/overview.md`。
-- 项目描述：用户提供的一句话目标，帮助 DeepSeek 生成更贴近项目的初始化内容。
+- 项目名：用于生成初始 `purpose.md` 和 init 日志。
+- 项目描述：用户提供的一句话目标，帮助 DeepSeek 生成更贴近项目目标的 `purpose.md`。
 
 DeepSeek 可用时，`init` 生成：
 
 - 定制版 `purpose.md`。
-- 定制版 `schema.md`。
-- 定制版 `wiki/overview.md`。
+- 固定模板 `schema.md`。
+- 空壳模板 `wiki/index.md` 和 `wiki/overview.md`。
 
 DeepSeek 不可用时，`init` 降级生成：
 
 - 默认模板 `purpose.md`。
-- 默认模板 `schema.md`。
-- 默认模板 `wiki/overview.md`。
+- 固定模板 `schema.md`。
+- 空壳模板 `wiki/index.md` 和 `wiki/overview.md`。
 
 降级不算失败，但必须写入 `wiki/log.md`：
 

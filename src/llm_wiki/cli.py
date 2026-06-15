@@ -33,7 +33,7 @@ def main(
     if args.command == "init":
         target_root = args.path or root
         name = _prompt_required(input_func, "这个 Wiki 项目叫什么？")
-        description = _prompt_required(input_func, "请用一句话描述这个项目：")
+        description = _prompt_required(input_func, "请描述这个项目：")
         generator = init_content_generator or generate_init_content_with_deepseek
         result = initialize_project(
             target_root,

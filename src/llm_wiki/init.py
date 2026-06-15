@@ -30,8 +30,6 @@ class InitResult:
 @dataclass(frozen=True)
 class InitContent:
     purpose: str
-    schema: str
-    overview: str
 
 
 def initialize_project(
@@ -48,9 +46,9 @@ def initialize_project(
 
     _create_directories(paths, result)
     _write_template(paths.purpose, init_content.purpose, PURPOSE_MARKER, result)
-    _write_template(paths.schema, init_content.schema, SCHEMA_MARKER, result)
-    _write_template(paths.wiki_index, index_template(name), INDEX_MARKER, result)
-    _write_template(paths.wiki_overview, init_content.overview, OVERVIEW_MARKER, result)
+    _write_template(paths.schema, schema_template(), SCHEMA_MARKER, result)
+    _write_template(paths.wiki_index, index_template(), INDEX_MARKER, result)
+    _write_template(paths.wiki_overview, overview_template(), OVERVIEW_MARKER, result)
     _write_generated_file(paths.config, write_default_config, force=False, result=result)
     _write_generated_file(paths.state, write_initial_state, force=False, result=result)
     _touch_file(paths.search_index, result)
@@ -81,8 +79,6 @@ def _generate_init_content(
     return (
         InitContent(
             purpose=purpose_template(name, description),
-            schema=schema_template(name),
-            overview=overview_template(name, description),
         ),
         "default_template",
     )

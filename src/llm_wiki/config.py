@@ -8,10 +8,10 @@ from pathlib import Path
 class LlmConfig:
     provider: str = "deepseek"
     base_url: str = "https://api.deepseek.com"
-    model: str = "deepseek-chat"
+    model: str = "deepseek-v4-pro"
     temperature: float = 0.2
     max_tokens: int = 4096
-    context_limit: int = 10000
+    context_limit: int = 640000
 
 
 @dataclass(frozen=True)

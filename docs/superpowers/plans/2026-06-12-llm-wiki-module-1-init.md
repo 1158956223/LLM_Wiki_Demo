@@ -2,9 +2,9 @@
 
 > **给 agentic worker 的要求：** 执行本计划时必须使用 `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`。所有步骤使用 checkbox（`- [ ]`）追踪状态。
 
-**目标：** 先交付第一个可独立测试的模块：Python 包骨架、路径/配置/状态/日志基础设施、DeepSeek 初始化内容生成、内置模板降级，以及交互式 `init` CLI 命令。
+**目标：** 先交付第一个可独立测试的模块：Python 包骨架、路径/配置/状态/日志基础设施、DeepSeek 辅助生成 `purpose.md`、内置模板降级，以及交互式 `init` CLI 命令。
 
-**架构：** CLI 入口保持很薄，只解析目标路径并询问项目名称与描述。确定性逻辑放在小模块中：`init` 负责创建项目目录结构、写入初始化内容、初始化配置/状态/搜索索引占位文件，并向 `wiki/log.md` 追加人类可读日志。DeepSeek 可用时生成 `purpose.md`、`schema.md` 和 `wiki/overview.md`；不可用时降级为内置模板。
+**架构：** CLI 入口保持很薄，只解析目标路径并询问项目名称与描述。确定性逻辑放在小模块中：`init` 负责创建项目目录结构、写入初始化内容、初始化配置/状态/搜索索引占位文件，并向 `wiki/log.md` 追加人类可读日志。DeepSeek 可用时只辅助生成 `purpose.md`；`schema.md` 始终使用固定中文协议模板，`wiki/index.md` 和 `wiki/overview.md` 在 init 阶段只创建空壳，等 ingest/apply 后更新。
 
 **技术栈：** Python 标准库、`argparse`、`dataclasses`、`json`、轻量 TOML 读取逻辑、`unittest`、`langchain_openai.ChatOpenAI`。当前本机环境是 Python 3.10，因此不依赖 Python 3.11 才有的 `tomllib`。测试文件只用于本地验证，不随本模块提交上传。
 
@@ -188,7 +188,7 @@ from llm_wiki.init import initialize_project
 
 - [x] **步骤 4：把 CLI 接到 `initialize_project`**
 
-`python -m llm_wiki init --path "D:\tmp\我的 Wiki"` 应该先询问项目名称和描述，再创建目标目录并把 wiki 文件写入该目录。初始化默认尝试读取 `DEEPSEEK_API_KEY` 并调用 DeepSeek 生成 `purpose.md`、`schema.md` 和 `wiki/overview.md`；如果 API Key 缺失或调用失败，命令不中断，降级使用内置模板。旧的 LLM 禁用参数和覆盖参数不再提供。
+`python -m llm_wiki init --path "D:\tmp\我的 Wiki"` 应该先询问项目名称和描述，再创建目标目录并把 wiki 文件写入该目录。初始化默认尝试读取 `DEEPSEEK_API_KEY` 并调用 DeepSeek 生成 `purpose.md`；如果 API Key 缺失或调用失败，命令不中断，降级使用内置模板。`schema.md` 固定为中文系统协议模板，`wiki/index.md` 和 `wiki/overview.md` 初始化时只创建空壳。旧的 LLM 禁用参数和覆盖参数不再提供。
 
 - [x] **步骤 5：运行相关测试**
 
