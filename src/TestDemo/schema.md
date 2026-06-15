@@ -1,37 +1,4 @@
-from __future__ import annotations
-
-
-PURPOSE_MARKER = "<!-- llm-wiki:template=purpose:v1 -->"
-SCHEMA_MARKER = "<!-- llm-wiki:template=schema:v1 -->"
-OVERVIEW_MARKER = "<!-- llm-wiki:template=overview:v1 -->"
-INDEX_MARKER = "<!-- llm-wiki:template=index:v1 -->"
-
-
-def purpose_template(name: str, description: str | None) -> str:
-    goal = description or "维护一个本地优先、Markdown 优先的长期知识库。"
-    return f"""{PURPOSE_MARKER}
-# {name} 的目的
-
-## 为什么存在
-
-{goal}
-
-## 关注范围
-
-- 需要长期保留、可追溯、可复用的知识。
-- 来自原始 Markdown 资料并带有明确来源的内容。
-- 经过人工审阅后可以沉淀进 wiki 的高价值问答。
-
-## 非关注范围
-
-- 没有来源支撑的一次性回答。
-- 未经人工确认的自动写回。
-- 和本 wiki 目标无关的资料堆积。
-"""
-
-
-def schema_template() -> str:
-    return f"""{SCHEMA_MARKER}
+<!-- llm-wiki:template=schema:v1 -->
 # LLM Wiki 固定协议
 
 ## 核心原则
@@ -81,7 +48,7 @@ status: active
 
 - 文件名由标题生成 slug。
 - 空白统一转为 `-`。
-- 移除 Windows 非法字符：`< > : " / \\ | ? *`。
+- 移除 Windows 非法字符：`< > : " / \ | ? *`。
 - 同名文件追加短 hash。
 - `source` 页文件名优先跟随原始 Markdown 文件名，保持 raw 到 wiki 的映射稳定。
 
@@ -117,40 +84,3 @@ status: active
 - LLM 只能生成 proposal。
 - 正式 wiki 页面只能通过人工审阅后的 apply 更新。
 - proposal 必须声明目标页面、操作类型、建议内容、理由和引用。
-"""
-
-
-def overview_template() -> str:
-    return f"""---
-type: overview
-title: 项目概览
-tags: []
-related: []
-created: YYYY-MM-DD
-updated: YYYY-MM-DD
----
-
-{OVERVIEW_MARKER}
-
-# 项目概览
-
-## 概览
-
-<!-- 导入 Markdown 资料后，在这里生成或维护当前知识库的高层概览。 -->
-"""
-
-
-def index_template() -> str:
-    return f"""{INDEX_MARKER}
-# Wiki 索引
-
-## 实体
-
-## 概念
-
-## 来源
-
-## 问题
-
-## 综合
-"""

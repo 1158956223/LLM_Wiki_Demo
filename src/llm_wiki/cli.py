@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 from typing import Callable, Sequence
 
-from .ingest import SummaryGenerator, ingest_source
+from .ingest import ExtractionGenerator, SummaryGenerator, ingest_source
 from .init import InitContent, initialize_project
 
 
@@ -29,6 +29,7 @@ def main(
     input_func: Callable[[str], str] = input,
     init_content_generator: Callable[[str, str], InitContent] | None = None,
     ingest_summary_generator: SummaryGenerator | None = None,
+    ingest_extraction_generator: ExtractionGenerator | None = None,
 ) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -56,9 +57,11 @@ def main(
             target_root,
             args.source,
             summary_generator=ingest_summary_generator,
+            extraction_generator=ingest_extraction_generator,
             confirm_name_conflict=lambda existing, incoming: _confirm_name_conflict(
                 input_func, existing, incoming
             ),
+            progress=print,
         )
         print(f"ingest completed: {result.source_path} -> {result.wiki_page}")
         return 0
