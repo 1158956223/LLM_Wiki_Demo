@@ -46,12 +46,12 @@ def schema_template() -> str:
 
 | type | 目录 | 说明 |
 |------|------|------|
-| source | `wiki/sources/` | 原始 Markdown 资料的摘要页，只由 ingest 创建或更新 |
-| concept | `wiki/concepts/` | 可长期复用的概念、方法、机制或术语 |
-| entity | `wiki/entities/` | 人物、组织、工具、模型、项目、论文等具名对象 |
-| query | `wiki/queries/` | 值得保留的问题、回答和后续研究线索 |
-| synthesis | `wiki/synthesis/` | 跨来源、跨页面形成的综合判断 |
-| overview | `wiki/overview.md` | 当前 wiki 的高层概览，由 ingest/apply 后更新 |
+| source | `wiki/sources/` | 原始 Markdown 资料的摘要页，由 ingest 创建或更新。 |
+| concept | `wiki/concepts/` | 可长期复用的概念、方法、机制或术语。 |
+| entity | `wiki/entities/` | 人物、组织、工具、模型、项目、论文等具名对象。 |
+| query | `wiki/queries/` | 值得保留的问题、回答和后续研究线索。 |
+| synthesis | `wiki/synthesis/` | 跨来源、跨页面形成的综合判断。 |
+| overview | `wiki/overview.md` | 当前 wiki 的高层概览，由 ingest/apply 后更新。 |
 
 ## Frontmatter 规范
 
@@ -101,7 +101,7 @@ status: active
 
 ## 索引与概览
 
-- `wiki/index.md` 是导航入口，按页面类型列出已存在页面。
+- `wiki/index.md` 是导航入口，按页面类型列出已经存在的页面。
 - `wiki/overview.md` 是项目概览，只总结已经进入 wiki 的内容。
 - init 阶段只创建空壳；ingest/apply 后再更新具体内容。
 
@@ -121,15 +121,16 @@ status: active
 
 
 def overview_template() -> str:
-    return f"""{OVERVIEW_MARKER}
----
+    return f"""---
 type: overview
 title: 项目概览
+created_at: YYYY-MM-DD
+updated_at: YYYY-MM-DD
+sources: []
 tags: []
-related: []
-created: YYYY-MM-DD
-updated: YYYY-MM-DD
+status: active
 ---
+{OVERVIEW_MARKER}
 
 # 项目概览
 
