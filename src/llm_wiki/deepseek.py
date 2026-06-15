@@ -71,6 +71,21 @@ class DeepSeekClient:
 
         return _parse_ingest_extraction(str(response.content))
 
+    def generate_ingest_overview(self, request: Any) -> str:
+        prompt = _build_ingest_overview_prompt(request)
+        model = self._chat_model()
+        try:
+            response = model.invoke(
+                [
+                    SystemMessage(content="你是本地 Markdown LLM Wiki 的项目概览撰写助手。只输出中文正文段落。"),
+                    HumanMessage(content=prompt),
+                ]
+            )
+        except Exception as exc:
+            raise DeepSeekUnavailableError(f"DeepSeek ingest overview failed: {exc}") from exc
+
+        return str(response.content).strip()
+
     def _chat_model(self) -> Any:
         if self.chat_model_factory is not None:
             return self.chat_model_factory()
@@ -94,6 +109,10 @@ def generate_ingest_summary_with_deepseek(request: Any) -> str:
 
 def generate_ingest_extraction_with_deepseek(request: Any) -> Any:
     return DeepSeekClient.from_environment().generate_ingest_extraction(request)
+
+
+def generate_ingest_overview_with_deepseek(request: Any) -> str:
+    return DeepSeekClient.from_environment().generate_ingest_overview(request)
 
 
 def _build_init_prompt(name: str, description: str) -> str:
@@ -185,6 +204,32 @@ def _build_ingest_extraction_prompt(request: Any) -> str:
 
 Markdown 内容：
 {content}
+"""
+
+
+def _build_ingest_overview_prompt(request: Any) -> str:
+    summaries = "\n\n".join(
+        f"### Source Summary {index}\n{summary}" for index, summary in enumerate(request.source_summaries, start=1)
+    )
+    concepts = "\n".join(f"- {title}" for title in request.concepts) or "- 暂无"
+    entities = "\n".join(f"- {title}" for title in request.entities) or "- 暂无"
+    return f"""请基于已经生成好的 source summary，为 LLM Wiki 的 `wiki/overview.md` 写“项目概览”正文。
+
+要求：
+- 只介绍这个 Wiki 项目主要在研究、记录或沉淀什么。
+- 不要复述来源数量、概念数量、实体数量等规模统计。
+- 不要输出 Markdown 标题、列表、代码围栏或 frontmatter。
+- 使用中文，保持事实性，不要编造 source summary 中没有的信息。
+- 输出 1 到 2 个自然段。
+
+已生成的 source summary：
+{summaries}
+
+已抽取的概念标题：
+{concepts}
+
+已抽取的实体标题：
+{entities}
 """
 
 

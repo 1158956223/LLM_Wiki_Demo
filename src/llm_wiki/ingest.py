@@ -18,6 +18,7 @@ from .state import load_state, write_state
 
 SummaryGenerator = Callable[["IngestSummaryRequest"], str]
 ExtractionGenerator = Callable[["IngestExtractionRequest"], "IngestExtraction"]
+OverviewGenerator = Callable[["IngestOverviewRequest"], str]
 NameConflictConfirmFunc = Callable[[Path, Path], bool]
 ProgressReporter = Callable[[str], None]
 
@@ -37,6 +38,13 @@ class IngestExtractionRequest:
     source_path: str
     summary: str
     chunks: list[str]
+
+
+@dataclass(frozen=True)
+class IngestOverviewRequest:
+    source_summaries: list[str]
+    concepts: list[str]
+    entities: list[str]
 
 
 @dataclass(frozen=True)
@@ -73,6 +81,7 @@ def ingest_source(
     *,
     summary_generator: SummaryGenerator | None = None,
     extraction_generator: ExtractionGenerator | None = None,
+    overview_generator: OverviewGenerator | None = None,
     confirm_name_conflict: NameConflictConfirmFunc | None = None,
     progress: ProgressReporter | None = None,
 ) -> IngestResult:
@@ -102,6 +111,16 @@ def ingest_source(
             chunks=request.chunks,
         )
     )
+    overview = (overview_generator or _default_overview_generator())(
+        IngestOverviewRequest(
+            source_summaries=[
+                *_source_summaries(paths, exclude=wiki_page),
+                summary,
+            ],
+            concepts=_existing_titles(paths.wiki_dir / "concepts") + [concept.title for concept in extraction.concepts],
+            entities=_existing_titles(paths.wiki_dir / "entities") + [entity.title for entity in extraction.entities],
+        )
+    )
 
     _report(progress, "[4/7] 写入 raw 和 wiki 页面")
     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -123,7 +142,7 @@ def ingest_source(
     _report(progress, "[5/7] 重建 wiki/index.md")
     _rebuild_wiki_index(paths)
     _report(progress, "[6/7] 更新 wiki/overview.md")
-    _rebuild_overview(paths)
+    _rebuild_overview(paths, overview)
     _report(progress, "[7/7] 刷新 search.sqlite")
     _rebuild_search_index(paths)
     append_log(
@@ -266,6 +285,12 @@ def _default_extraction_generator() -> ExtractionGenerator:
     return generate_ingest_extraction_with_deepseek
 
 
+def _default_overview_generator() -> OverviewGenerator:
+    from .deepseek import generate_ingest_overview_with_deepseek
+
+    return generate_ingest_overview_with_deepseek
+
+
 def _source_page(title: str, source_rel: str, summary: str, extraction: IngestExtraction) -> str:
     today = date.today().isoformat()
     concept_lines = _link_lines([concept.title for concept in extraction.concepts])
@@ -395,7 +420,7 @@ status: active
 def _link_lines(titles: list[str]) -> str:
     if not titles:
         return "\n"
-    return "".join(f"\n- [[{title}]]" for title in titles) + "\n"
+    return "".join(f"\n- [[{_slug(title)}]]" for title in titles) + "\n"
 
 
 def _slug(title: str) -> str:
@@ -421,7 +446,7 @@ def _rebuild_wiki_index(paths: ProjectPaths) -> None:
     paths.wiki_index.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
 
-def _rebuild_overview(paths: ProjectPaths) -> None:
+def _rebuild_overview(paths: ProjectPaths, overview: str) -> None:
     sources = _index_entries(paths.wiki_dir / "sources", "sources")
     concepts = _index_entries(paths.wiki_dir / "concepts", "concepts")
     entities = _index_entries(paths.wiki_dir / "entities", "entities")
@@ -442,31 +467,16 @@ updated_at: {today}
 
 ## 概览
 
-这个 wiki 已经导入 {len(sources)} 份来源资料，并沉淀出 {len(concepts)} 个概念页面和 {len(entities)} 个实体页面。
+{overview.strip()}
 
 ## 当前规模
 
 - 来源资料：{len(sources)}
 - 概念页面：{len(concepts)}
 - 实体页面：{len(entities)}
-
-## 最近来源
-{_overview_list(sources)}
-
-## 主要概念
-{_overview_list(concepts)}
-
-## 相关实体
-{_overview_list(entities)}
 """,
         encoding="utf-8",
     )
-
-
-def _overview_list(entries: list[str]) -> str:
-    if not entries:
-        return "\n- 暂无\n"
-    return "\n" + "\n".join(entries) + "\n"
 
 
 def _index_entries(directory: Path, rel_dir: str) -> list[str]:
@@ -488,6 +498,34 @@ def _title_from_wiki_page(path: Path) -> str:
         if line.startswith("# "):
             return line[2:].strip()
     return path.stem.replace("-", " ")
+
+
+def _existing_titles(directory: Path) -> list[str]:
+    if not directory.exists():
+        return []
+    return [_title_from_wiki_page(page) for page in sorted(directory.glob("*.md"), key=lambda item: item.name.lower())]
+
+
+def _source_summaries(paths: ProjectPaths, *, exclude: Path | None = None) -> list[str]:
+    directory = paths.wiki_dir / "sources"
+    if not directory.exists():
+        return []
+    summaries: list[str] = []
+    excluded = exclude.resolve() if exclude is not None else None
+    for page in sorted(directory.glob("*.md"), key=lambda item: item.name.lower()):
+        if excluded is not None and page.resolve() == excluded:
+            continue
+        summary = _source_summary(page.read_text(encoding="utf-8"))
+        if summary:
+            summaries.append(summary)
+    return summaries
+
+
+def _source_summary(text: str) -> str:
+    match = re.search(r"^## Summary\s*\n(?P<body>.*?)(?=^## |\Z)", text, flags=re.MULTILINE | re.DOTALL)
+    if not match:
+        return ""
+    return match.group("body").strip()
 
 
 def _rebuild_search_index(paths: ProjectPaths) -> None:

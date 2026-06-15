@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 from typing import Callable, Sequence
 
-from .ingest import ExtractionGenerator, SummaryGenerator, ingest_source
+from .ingest import ExtractionGenerator, OverviewGenerator, SummaryGenerator, ingest_source
 from .init import InitContent, initialize_project
 
 
@@ -30,6 +30,7 @@ def main(
     init_content_generator: Callable[[str, str], InitContent] | None = None,
     ingest_summary_generator: SummaryGenerator | None = None,
     ingest_extraction_generator: ExtractionGenerator | None = None,
+    ingest_overview_generator: OverviewGenerator | None = None,
 ) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -58,6 +59,7 @@ def main(
             args.source,
             summary_generator=ingest_summary_generator,
             extraction_generator=ingest_extraction_generator,
+            overview_generator=ingest_overview_generator,
             confirm_name_conflict=lambda existing, incoming: _confirm_name_conflict(
                 input_func, existing, incoming
             ),
