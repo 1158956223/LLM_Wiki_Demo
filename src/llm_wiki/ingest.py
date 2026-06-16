@@ -4,7 +4,7 @@ import hashlib
 import os
 import re
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 from typing import Callable
@@ -51,7 +51,10 @@ class IngestOverviewRequest:
 class ExtractedConcept:
     title: str
     summary: str
-    related: list[str]
+    related: list[str] = field(default_factory=list)
+    key_points: list[str] = field(default_factory=list)
+    usage_contexts: list[str] = field(default_factory=list)
+    confusions: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -59,7 +62,10 @@ class ExtractedEntity:
     title: str
     category: str
     summary: str
-    related: list[str]
+    related: list[str] = field(default_factory=list)
+    role: str = ""
+    facts: list[str] = field(default_factory=list)
+    wiki_relevance: str = ""
 
 
 @dataclass(frozen=True)
@@ -349,8 +355,20 @@ status: active
 def _write_concept_pages(paths: ProjectPaths, concepts: list[ExtractedConcept], source_rel: str) -> list[Path]:
     (paths.wiki_dir / "concepts").mkdir(parents=True, exist_ok=True)
     return [
-        _upsert_knowledge_page(paths, "concepts", "concept", concept.title, concept.summary, concept.related,
-                               source_rel)
+        _upsert_knowledge_page(
+            paths,
+            "concepts",
+            "concept",
+            concept.title,
+            concept.summary,
+            concept.related,
+            source_rel,
+            sections=[
+                ("核心要点", concept.key_points),
+                ("适用场景", concept.usage_contexts),
+                ("容易混淆的点", concept.confusions),
+            ],
+        )
         for concept in concepts
     ]
 
@@ -368,6 +386,11 @@ def _write_entity_pages(paths: ProjectPaths, entities: list[ExtractedEntity], so
                 entity.summary,
                 entity.related,
                 source_rel,
+                sections=[
+                    ("角色/类型", entity.role or entity.category),
+                    ("相关事实", entity.facts),
+                    ("与本 Wiki 的关系", entity.wiki_relevance),
+                ],
                 extra_frontmatter=f"category: {entity.category}\n",
             )
         )
@@ -384,10 +407,14 @@ def _upsert_knowledge_page(
     related: list[str],
     source_rel: str,
     *,
+    sections: list[tuple[str, str | list[str]]] | None = None,
     extra_frontmatter: str = "",
 ) -> Path:
     page = paths.wiki_dir / directory / f"{_slug(title)}.md"
     today = date.today().isoformat()
+    section_text = _render_sections(sections or [])
+    if section_text:
+        summary = f"{summary.rstrip()}\n\n{section_text.rstrip()}"
     related_lines = _link_lines(related)
     addition = f"""## 来自 {source_rel} 的补充
 
@@ -442,6 +469,24 @@ def _link_lines(titles: list[str]) -> str:
     if not titles:
         return "\n"
     return "".join(f"\n- [[{_slug(title)}]]" for title in titles) + "\n"
+
+
+def _render_sections(sections: list[tuple[str, str | list[str]]]) -> str:
+    rendered: list[str] = []
+    for heading, body in sections:
+        if isinstance(body, list):
+            items = [item.strip() for item in body if item.strip()]
+            if not items:
+                continue
+            content = "\n".join(f"- {item}" for item in items)
+        else:
+            content = body.strip()
+            if not content:
+                continue
+        rendered.append(f"## {heading}\n\n{content}")
+    if not rendered:
+        return ""
+    return "\n\n".join(rendered) + "\n"
 
 
 def _slug(title: str) -> str:

@@ -130,7 +130,6 @@ class DeepSeekClient:
             model=self.config.llm.model,
             temperature=self.config.llm.temperature,
             max_completion_tokens=self.config.llm.max_tokens,
-            timeout=30,
         )
 
 
@@ -225,6 +224,9 @@ def _build_ingest_extraction_prompt(request: Any) -> str:
     {{
       "title": "概念名",
       "summary": "概念的事实性说明",
+      "key_points": ["概念的核心要点"],
+      "usage_contexts": ["概念在来源中的使用场景"],
+      "confusions": ["容易混淆或需要边界说明的点"],
       "related": ["相关概念或实体"]
     }}
   ],
@@ -233,6 +235,9 @@ def _build_ingest_extraction_prompt(request: Any) -> str:
       "title": "实体名",
       "category": "person|organization|tool|model|project|paper|other",
       "summary": "实体的事实性说明",
+      "role": "实体在来源中扮演的角色或类型",
+      "facts": ["关于该实体的可支撑事实"],
+      "wiki_relevance": "该实体与本 Wiki 主题的关系",
       "related": ["相关概念或实体"]
     }}
   ]
@@ -242,6 +247,8 @@ def _build_ingest_extraction_prompt(request: Any) -> str:
 - 只提取来源中明确出现或能直接支撑的内容。
 - title 要短，适合成为 Markdown 页面标题。
 - summary 使用中文，避免编造。
+- 概念页面尽量提供 2-5 个 key_points、1-3 个 usage_contexts；只有来源中支持时才提供 confusions。
+- 实体页面尽量提供 role、2-5 个 facts、wiki_relevance。
 - related 使用标题文本，不要使用文件路径。
 - 如果没有合适内容，返回空数组。
 
@@ -319,6 +326,9 @@ def _parse_ingest_extraction(content: str) -> Any:
                 title=str(item["title"]),
                 summary=str(item.get("summary", "")),
                 related=[str(value) for value in item.get("related", [])],
+                key_points=[str(value) for value in item.get("key_points", [])],
+                usage_contexts=[str(value) for value in item.get("usage_contexts", [])],
+                confusions=[str(value) for value in item.get("confusions", [])],
             )
             for item in data.get("concepts", [])
         ]
@@ -328,6 +338,9 @@ def _parse_ingest_extraction(content: str) -> Any:
                 category=str(item.get("category", "other")),
                 summary=str(item.get("summary", "")),
                 related=[str(value) for value in item.get("related", [])],
+                role=str(item.get("role", "")),
+                facts=[str(value) for value in item.get("facts", [])],
+                wiki_relevance=str(item.get("wiki_relevance", "")),
             )
             for item in data.get("entities", [])
         ]
