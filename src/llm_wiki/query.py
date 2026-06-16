@@ -100,6 +100,7 @@ def _ensure_initialized(paths: ProjectPaths) -> None:
         raise ProjectNotInitializedError(f"project is not initialized: missing {missing[0]}")
 
 
+# 根据hit去读文件内容
 def _load_context_pages(
     paths: ProjectPaths,
     hits: list[SearchResult],

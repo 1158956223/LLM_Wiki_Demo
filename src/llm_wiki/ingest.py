@@ -13,9 +13,8 @@ from .config import IngestConfig, load_config
 from .errors import DeepSeekUnavailableError, DuplicateSourceError, ProjectNotInitializedError, UnsafePathError
 from .log import append_log
 from .paths import ProjectPaths
-from .search import rebuild_search_index
+from .search import rebuild_search_index, _title_from_wiki_page
 from .state import load_state, write_state
-
 
 SummaryGenerator = Callable[["IngestSummaryRequest"], str]
 ExtractionGenerator = Callable[["IngestExtractionRequest"], "IngestExtraction"]
@@ -77,14 +76,14 @@ class IngestResult:
 
 
 def ingest_source(
-    root: str | Path,
-    source: str | Path,
-    *,
-    summary_generator: SummaryGenerator | None = None,
-    extraction_generator: ExtractionGenerator | None = None,
-    overview_generator: OverviewGenerator | None = None,
-    confirm_name_conflict: NameConflictConfirmFunc | None = None,
-    progress: ProgressReporter | None = None,
+        root: str | Path,
+        source: str | Path,
+        *,
+        summary_generator: SummaryGenerator | None = None,
+        extraction_generator: ExtractionGenerator | None = None,
+        overview_generator: OverviewGenerator | None = None,
+        confirm_name_conflict: NameConflictConfirmFunc | None = None,
+        progress: ProgressReporter | None = None,
 ) -> IngestResult:
     paths = ProjectPaths(Path(root))
     _ensure_initialized(paths)
@@ -125,8 +124,12 @@ def ingest_source(
 
     _report(progress, "[4/7] 写入 raw 和 wiki 页面")
     target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # 将原始文件复制到raw
     shutil.copy2(incoming_path, target_path)
     wiki_page.parent.mkdir(parents=True, exist_ok=True)
+
+    # 生成source页面
     wiki_page.write_text(_source_page(title, source_rel, summary, extraction), encoding="utf-8")
     concept_pages = _write_concept_pages(paths, extraction.concepts, source_rel)
     entity_pages = _write_entity_pages(paths, extraction.entities, source_rel)
@@ -158,6 +161,7 @@ def ingest_source(
     return IngestResult(source_path=source_rel, wiki_page=wiki_rel, sha256=digest)
 
 
+# 打印进度
 def _report(progress: ProgressReporter | None, message: str) -> None:
     if progress is not None:
         progress(message)
@@ -170,6 +174,7 @@ def _ensure_initialized(paths: ProjectPaths) -> None:
         raise ProjectNotInitializedError(f"project is not initialized: missing {missing[0]}")
 
 
+# 只允许从外部导入.md文件
 def _resolve_external_source(
     paths: ProjectPaths,
     source: str | Path,
@@ -199,6 +204,7 @@ def _resolve_external_source(
     return source_path, target_path, digest
 
 
+# 防止重复导入
 def _ensure_not_duplicate(paths: ProjectPaths, digest: str) -> None:
     state = load_state(paths.state)
     for source_rel, entry in state.get("sources", {}).items():
@@ -206,6 +212,7 @@ def _ensure_not_duplicate(paths: ProjectPaths, digest: str) -> None:
             raise DuplicateSourceError(f"source has already been ingested: {source_rel}")
 
 
+# 从 Markdown 文件中提取标题，优先找第一个一级标题，如果没找到一级标题，就用文件名生成标题。
 def _title_from_source(source_path: Path, source_text: str) -> str:
     for line in source_text.splitlines():
         stripped = line.strip()
@@ -214,6 +221,7 @@ def _title_from_source(source_path: Path, source_text: str) -> str:
     return source_path.stem.replace("-", " ").replace("_", " ").title()
 
 
+# 中短文档不会切块，只切块长文档
 def _build_summary_request(source_text: str, source_rel: str, config: IngestConfig) -> IngestSummaryRequest:
     char_count = len(source_text)
     if char_count <= config.short_doc_limit:
@@ -241,6 +249,7 @@ def _build_summary_request(source_text: str, source_rel: str, config: IngestConf
     )
 
 
+# 切分文档，合成chunk
 def _chunk_markdown(source_text: str, config: IngestConfig) -> list[str]:
     sections = _split_markdown_sections(source_text)
     chunks: list[str] = []
@@ -260,6 +269,7 @@ def _chunk_markdown(source_text: str, config: IngestConfig) -> list[str]:
     return chunks or [source_text]
 
 
+# 按照二级标题进行切分
 def _split_markdown_sections(source_text: str) -> list[str]:
     sections: list[str] = []
     current: list[str] = []
@@ -298,6 +308,7 @@ def _default_overview_generator() -> OverviewGenerator:
     return generate_ingest_overview_with_deepseek
 
 
+# 生成source中的内容
 def _source_page(title: str, source_rel: str, summary: str, extraction: IngestExtraction) -> str:
     today = date.today().isoformat()
     concept_lines = _link_lines([concept.title for concept in extraction.concepts])
@@ -338,7 +349,8 @@ status: active
 def _write_concept_pages(paths: ProjectPaths, concepts: list[ExtractedConcept], source_rel: str) -> list[Path]:
     (paths.wiki_dir / "concepts").mkdir(parents=True, exist_ok=True)
     return [
-        _upsert_knowledge_page(paths, "concepts", "concept", concept.title, concept.summary, concept.related, source_rel)
+        _upsert_knowledge_page(paths, "concepts", "concept", concept.title, concept.summary, concept.related,
+                               source_rel)
         for concept in concepts
     ]
 
@@ -362,6 +374,7 @@ def _write_entity_pages(paths: ProjectPaths, entities: list[ExtractedEntity], so
     return pages
 
 
+# 如果页面不存在，就创建；如果页面已经存在，就追加内容。
 def _upsert_knowledge_page(
     paths: ProjectPaths,
     directory: str,
@@ -424,6 +437,7 @@ status: active
     return page
 
 
+# 标题列表转成 wiki 双链列表
 def _link_lines(titles: list[str]) -> str:
     if not titles:
         return "\n"
@@ -437,6 +451,7 @@ def _slug(title: str) -> str:
     return cleaned or "untitled"
 
 
+# 更新 wiki/index.md
 def _rebuild_wiki_index(paths: ProjectPaths) -> None:
     sections = [
         ("实体", paths.wiki_dir / "entities", "entities"),
@@ -453,6 +468,7 @@ def _rebuild_wiki_index(paths: ProjectPaths) -> None:
     paths.wiki_index.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
 
+# 更新 overview.md
 def _rebuild_overview(paths: ProjectPaths, overview: str) -> None:
     sources = _index_entries(paths.wiki_dir / "sources", "sources")
     concepts = _index_entries(paths.wiki_dir / "concepts", "concepts")
@@ -496,23 +512,13 @@ def _index_entries(directory: Path, rel_dir: str) -> list[str]:
     return entries
 
 
-def _title_from_wiki_page(path: Path) -> str:
-    text = path.read_text(encoding="utf-8")
-    match = re.search(r"^title:\s*(.+)$", text, flags=re.MULTILINE)
-    if match:
-        return match.group(1).strip().strip('"')
-    for line in text.splitlines():
-        if line.startswith("# "):
-            return line[2:].strip()
-    return path.stem.replace("-", " ")
-
-
 def _existing_titles(directory: Path) -> list[str]:
     if not directory.exists():
         return []
     return [_title_from_wiki_page(page) for page in sorted(directory.glob("*.md"), key=lambda item: item.name.lower())]
 
 
+# 读取已有所有 source 页面的摘要
 def _source_summaries(paths: ProjectPaths, *, exclude: Path | None = None) -> list[str]:
     directory = paths.wiki_dir / "sources"
     if not directory.exists():
