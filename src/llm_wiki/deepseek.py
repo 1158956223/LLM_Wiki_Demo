@@ -86,6 +86,41 @@ class DeepSeekClient:
 
         return str(response.content).strip()
 
+    def generate_query_answer(self, request: Any) -> str:
+        prompt = _build_query_prompt(request)
+        model = self._chat_model()
+        try:
+            response = model.invoke(
+                [
+                    SystemMessage(content="你是本地 Markdown LLM Wiki 的问答助手。必须基于给定上下文回答，并给出引用。"),
+                    HumanMessage(content=prompt),
+                ]
+            )
+        except Exception as exc:
+            raise DeepSeekUnavailableError(f"DeepSeek query failed: {exc}") from exc
+
+        return str(response.content).strip()
+
+    def generate_query_answer_stream(self, request: Any, on_token: Callable[[str], None]) -> str:
+        prompt = _build_query_prompt(request)
+        model = self._chat_model()
+        messages = [
+            SystemMessage(content="你是本地 Markdown LLM Wiki 的问答助手。必须基于给定上下文回答，并给出引用。"),
+            HumanMessage(content=prompt),
+        ]
+        chunks: list[str] = []
+        try:
+            for chunk in model.stream(messages):
+                token = _content_to_text(getattr(chunk, "content", ""))
+                if not token:
+                    continue
+                on_token(token)
+                chunks.append(token)
+        except Exception as exc:
+            raise DeepSeekUnavailableError(f"DeepSeek query failed: {exc}") from exc
+
+        return "".join(chunks).strip()
+
     def _chat_model(self) -> Any:
         if self.chat_model_factory is not None:
             return self.chat_model_factory()
@@ -113,6 +148,14 @@ def generate_ingest_extraction_with_deepseek(request: Any) -> Any:
 
 def generate_ingest_overview_with_deepseek(request: Any) -> str:
     return DeepSeekClient.from_environment().generate_ingest_overview(request)
+
+
+def generate_query_answer_with_deepseek(request: Any) -> str:
+    return DeepSeekClient.from_environment().generate_query_answer(request)
+
+
+def generate_query_answer_stream_with_deepseek(request: Any, on_token: Callable[[str], None]) -> str:
+    return DeepSeekClient.from_environment().generate_query_answer_stream(request, on_token)
 
 
 def _build_init_prompt(name: str, description: str) -> str:
@@ -233,6 +276,35 @@ def _build_ingest_overview_prompt(request: Any) -> str:
 """
 
 
+def _build_query_prompt(request: Any) -> str:
+    context = "\n\n".join(
+        f"### {page.path}\nTitle: {page.title}\n\n{page.content}"
+        for page in request.context_pages
+    )
+    return f"""请基于本地 LLM Wiki 上下文回答问题。
+
+问题：
+{request.question}
+
+项目目的：
+{request.purpose}
+
+Wiki 协议：
+{request.schema}
+
+要求：
+- 默认使用中文回答。
+- 只能使用 Context 中出现的信息作为事实依据。
+- 如果 Context 证据不足，请明确说明“当前 wiki 证据不足”。
+- 不要编造不存在的文件路径、标题或引用。
+- 回答末尾必须包含 `## Sources`，并列出引用路径。
+- 引用路径只能来自 Context 标题中的路径，可以带 heading。
+
+Context:
+{context}
+"""
+
+
 def _parse_ingest_extraction(content: str) -> Any:
     from .ingest import ExtractedConcept, ExtractedEntity, IngestExtraction
 
@@ -276,3 +348,21 @@ def _parse_init_content(content: str) -> InitContent:
         )
     except (KeyError, TypeError, json.JSONDecodeError) as exc:
         raise DeepSeekUnavailableError("DeepSeek returned invalid init content") from exc
+
+
+def _content_to_text(content: Any) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text")
+                if text is not None:
+                    parts.append(str(text))
+        return "".join(parts)
+    return str(content)

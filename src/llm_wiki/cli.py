@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import builtins
 from pathlib import Path
 from typing import Callable, Sequence
 
 from .ingest import ExtractionGenerator, OverviewGenerator, SummaryGenerator, ingest_source
 from .init import InitContent, initialize_project
+from .query import QueryAnswerGenerator, QueryAnswerStreamer, answer_query
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -19,6 +21,10 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_parser.add_argument("--path", type=Path, help="已初始化的 LLM Wiki 项目目录")
     ingest_parser.add_argument("source", type=Path)
 
+    query_parser = subparsers.add_parser("query", help="query wiki")
+    query_parser.add_argument("--path", type=Path)
+    query_parser.add_argument("question")
+
     return parser
 
 
@@ -31,7 +37,11 @@ def main(
     ingest_summary_generator: SummaryGenerator | None = None,
     ingest_extraction_generator: ExtractionGenerator | None = None,
     ingest_overview_generator: OverviewGenerator | None = None,
+    query_answer_generator: QueryAnswerGenerator | None = None,
+    query_answer_streamer: QueryAnswerStreamer | None = None,
+    print_func: Callable[..., None] | None = None,
 ) -> int:
+    print_func = print_func or builtins.print
     parser = build_parser()
     args = parser.parse_args(argv)
     root = cwd or Path.cwd()
@@ -47,9 +57,9 @@ def main(
             description=description,
             init_content_generator=generator,
         )
-        print(f"init completed: created={len(result.created)} skipped={len(result.skipped)}")
+        print_func(f"init completed: created={len(result.created)} skipped={len(result.skipped)}")
         for warning in result.warnings:
-            print(f"warning: {warning}")
+            print_func(f"warning: {warning}")
         return 0
 
     if args.command == "ingest":
@@ -63,9 +73,29 @@ def main(
             confirm_name_conflict=lambda existing, incoming: _confirm_name_conflict(
                 input_func, existing, incoming
             ),
-            progress=print,
+            progress=print_func,
         )
-        print(f"ingest completed: {result.source_path} -> {result.wiki_page}")
+        print_func(f"ingest completed: {result.source_path} -> {result.wiki_page}")
+        return 0
+
+    if args.command == "query":
+        target_root = (root / args.path) if args.path else root
+        stream_tokens = query_answer_generator is None
+        result = answer_query(
+            target_root,
+            args.question,
+            answer_generator=query_answer_generator,
+            answer_streamer=query_answer_streamer,
+            on_token=(
+                lambda token: print_func(token, end="", flush=True)
+                if stream_tokens
+                else None
+            ),
+        )
+        if stream_tokens:
+            print_func("")
+        else:
+            print_func(result.answer)
         return 0
 
     return 0

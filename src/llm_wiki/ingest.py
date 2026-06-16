@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import shutil
-import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Callable
 
 from .config import IngestConfig, load_config
-from .errors import DuplicateSourceError, ProjectNotInitializedError, UnsafePathError
+from .errors import DeepSeekUnavailableError, DuplicateSourceError, ProjectNotInitializedError, UnsafePathError
 from .log import append_log
 from .paths import ProjectPaths
+from .search import rebuild_search_index
 from .state import load_state, write_state
 
 
@@ -144,7 +145,7 @@ def ingest_source(
     _report(progress, "[6/7] 更新 wiki/overview.md")
     _rebuild_overview(paths, overview)
     _report(progress, "[7/7] 刷新 search.sqlite")
-    _rebuild_search_index(paths)
+    rebuild_search_index(paths.root)
     append_log(
         paths.wiki_log,
         "ingest",
@@ -274,18 +275,24 @@ def _split_markdown_sections(source_text: str) -> list[str]:
 
 
 def _default_summary_generator() -> SummaryGenerator:
+    if not os.environ.get("DEEPSEEK_API_KEY"):
+        raise DeepSeekUnavailableError("DEEPSEEK_API_KEY is not set")
     from .deepseek import generate_ingest_summary_with_deepseek
 
     return generate_ingest_summary_with_deepseek
 
 
 def _default_extraction_generator() -> ExtractionGenerator:
+    if not os.environ.get("DEEPSEEK_API_KEY"):
+        raise DeepSeekUnavailableError("DEEPSEEK_API_KEY is not set")
     from .deepseek import generate_ingest_extraction_with_deepseek
 
     return generate_ingest_extraction_with_deepseek
 
 
 def _default_overview_generator() -> OverviewGenerator:
+    if not os.environ.get("DEEPSEEK_API_KEY"):
+        raise DeepSeekUnavailableError("DEEPSEEK_API_KEY is not set")
     from .deepseek import generate_ingest_overview_with_deepseek
 
     return generate_ingest_overview_with_deepseek
@@ -526,40 +533,3 @@ def _source_summary(text: str) -> str:
     if not match:
         return ""
     return match.group("body").strip()
-
-
-def _rebuild_search_index(paths: ProjectPaths) -> None:
-    paths.search_index.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(paths.search_index) as connection:
-        connection.execute("DROP TABLE IF EXISTS pages_fts")
-        connection.execute("DROP TABLE IF EXISTS pages")
-        connection.execute(
-            "CREATE TABLE pages (path TEXT PRIMARY KEY, title TEXT NOT NULL, type TEXT NOT NULL, content TEXT NOT NULL)"
-        )
-        _create_fts_table(connection)
-        for page in sorted(paths.wiki_dir.rglob("*.md")):
-            rel_path = page.relative_to(paths.root).as_posix()
-            text = page.read_text(encoding="utf-8")
-            title = _title_from_wiki_page(page)
-            page_type = _frontmatter_value(text, "type") or "unknown"
-            row = (rel_path, title, page_type, text)
-            connection.execute("INSERT INTO pages(path, title, type, content) VALUES (?, ?, ?, ?)", row)
-            connection.execute("INSERT INTO pages_fts(path, title, type, content) VALUES (?, ?, ?, ?)", row)
-
-
-def _create_fts_table(connection: sqlite3.Connection) -> None:
-    try:
-        connection.execute(
-            "CREATE VIRTUAL TABLE pages_fts USING fts5(path UNINDEXED, title, type UNINDEXED, content, tokenize='trigram')"
-        )
-    except sqlite3.OperationalError:
-        connection.execute(
-            "CREATE VIRTUAL TABLE pages_fts USING fts5(path UNINDEXED, title, type UNINDEXED, content)"
-        )
-
-
-def _frontmatter_value(text: str, key: str) -> str | None:
-    match = re.search(rf"^{re.escape(key)}:\s*(.+)$", text, flags=re.MULTILINE)
-    if not match:
-        return None
-    return match.group(1).strip().strip('"')
