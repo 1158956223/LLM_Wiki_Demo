@@ -42,10 +42,6 @@ class ProjectPaths:
         return self.wiki_dir / "overview.md"
 
     @property
-    def proposals_dir(self) -> Path:
-        return self.root / "proposals"
-
-    @property
     def tool_dir(self) -> Path:
         return self.root / ".llm-wiki"
 

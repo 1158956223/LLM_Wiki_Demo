@@ -92,9 +92,6 @@ def _create_directories(paths: ProjectPaths, result: InitResult) -> None:
         paths.wiki_dir / "entities",
         paths.wiki_dir / "synthesis",
         paths.wiki_dir / "queries",
-        paths.proposals_dir / "pending",
-        paths.proposals_dir / "applied",
-        paths.proposals_dir / "rejected",
         paths.tool_dir,
     ]
     for directory in directories:

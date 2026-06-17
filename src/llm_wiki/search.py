@@ -140,6 +140,13 @@ def _like_search(connection: sqlite3.Connection, query: str, top_k: int) -> list
 # 从用户提问中提取关键字
 def _search_terms(query: str) -> list[str]:
     normalized_query = _normalize_query_text(query)
+    terms: list[str] = []
+    for term in re.findall(r"[A-Za-z0-9]+", normalized_query, flags=re.UNICODE):
+        normalized = term.strip().lower()
+        if len(normalized) < 3:
+            continue
+        terms.append(term)
+
     chinese_text = "".join(re.findall(r"[\u4e00-\u9fff]+", normalized_query, flags=re.UNICODE))
     if chinese_text:
         for stopword in [
@@ -155,22 +162,14 @@ def _search_terms(query: str) -> list[str]:
             "说说",
         ]:
             chinese_text = chinese_text.replace(stopword, "")
-        if len(chinese_text) < 2:
-            return []
-        terms = [chinese_text]
-        if len(chinese_text) >= 3:
-            terms.extend(chinese_text[index: index + 2] for index in range(len(chinese_text) - 1))
-        if len(chinese_text) >= 4:
-            terms.extend(chinese_text[index: index + 3] for index in range(len(chinese_text) - 2))
-        return list(dict.fromkeys(terms))[:8]
+        if len(chinese_text) >= 2:
+            terms.append(chinese_text)
+            if len(chinese_text) >= 3:
+                terms.extend(chinese_text[index: index + 2] for index in range(len(chinese_text) - 1))
+            if len(chinese_text) >= 4:
+                terms.extend(chinese_text[index: index + 3] for index in range(len(chinese_text) - 2))
 
-    terms = []
-    for term in re.findall(r"[A-Za-z0-9]+", normalized_query, flags=re.UNICODE):
-        normalized = term.strip().lower()
-        if len(normalized) < 3:
-            continue
-        terms.append(term)
-    return terms[:8]
+    return list(dict.fromkeys(terms))[:8]
 
 
 def _normalize_query_text(query: str) -> str:

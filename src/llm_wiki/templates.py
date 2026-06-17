@@ -46,12 +46,12 @@ def schema_template() -> str:
 
 | type | 目录 | 说明 |
 |------|------|------|
-| source | `wiki/sources/` | 原始 Markdown 资料的摘要页，只由 ingest 创建或更新 |
+| source | `wiki/sources/` | 原始 Markdown 资料的摘要页，只由外部资料摄入流程创建或更新 |
 | concept | `wiki/concepts/` | 可长期复用的概念、方法、机制或术语 |
 | entity | `wiki/entities/` | 人物、组织、工具、模型、项目、论文等具名对象 |
 | query | `wiki/queries/` | 值得保留的问题、回答和后续研究线索 |
 | synthesis | `wiki/synthesis/` | 跨来源、跨页面形成的综合判断 |
-| overview | `wiki/overview.md` | 当前 wiki 的高层概览，由 ingest/apply 后更新 |
+| overview | `wiki/overview.md` | 当前 wiki 的高层概览，由资料摄入或知识写回流程更新 |
 
 ## Frontmatter 规范
 
@@ -103,7 +103,7 @@ status: active
 
 - `wiki/index.md` 是导航入口，按页面类型列出已存在页面。
 - `wiki/overview.md` 是项目概览，只总结已经进入 wiki 的内容。
-- init 阶段只创建空壳；ingest/apply 后再更新具体内容。
+- 初始化阶段只创建空壳；资料摄入或知识写回后再更新具体内容。
 
 ## 矛盾与不确定性
 
@@ -114,9 +114,10 @@ status: active
 
 ## 写回边界
 
-- LLM 只能生成 proposal。
-- 正式 wiki 页面只能通过人工审阅后的 apply 更新。
-- proposal 必须声明目标页面、操作类型、建议内容、理由和引用。
+- 当用户确认沉淀最近一次问答时，系统会保存原始问题和回答到 `wiki/queries/`。
+- 如果问答包含新的长期知识，系统可以更新 `wiki/concepts/`、`wiki/entities/` 或 `wiki/synthesis/`。
+- 如果问答与已有长期知识重复度过高，且没有新的概念、边界、例子、流程或结论，则只保留 `wiki/queries/` 记录，不更新长期知识页。
+- 对话沉淀不写入 `wiki/sources/`；外部原始资料只能通过资料摄入流程进入。
 """
 
 

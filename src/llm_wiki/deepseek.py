@@ -121,6 +121,38 @@ class DeepSeekClient:
 
         return "".join(chunks).strip()
 
+    def generate_proposal_writes(self, request: Any) -> Any:
+        prompt = _build_proposal_prompt(request)
+        model = self._chat_model()
+        try:
+            response = model.invoke(
+                [
+                    SystemMessage(content="你是本地 Markdown LLM Wiki 的知识沉淀助手。只输出 JSON。"),
+                    HumanMessage(content=prompt),
+                ]
+            )
+        except Exception as exc:
+            raise DeepSeekUnavailableError(f"DeepSeek add generation failed: {exc}") from exc
+
+        from .proposal import proposal_writes_from_json
+
+        return proposal_writes_from_json(str(response.content))
+
+    def merge_page_body(self, request: Any) -> str:
+        prompt = _build_page_body_merge_prompt(request)
+        model = self._chat_model()
+        try:
+            response = model.invoke(
+                [
+                    SystemMessage(content="你是本地 Markdown LLM Wiki 的页面合并助手。只输出合并后的 Markdown 正文。"),
+                    HumanMessage(content=prompt),
+                ]
+            )
+        except Exception as exc:
+            raise DeepSeekUnavailableError(f"DeepSeek page merge failed: {exc}") from exc
+
+        return str(response.content).strip()
+
     def _chat_model(self) -> Any:
         if self.chat_model_factory is not None:
             return self.chat_model_factory()
@@ -155,6 +187,14 @@ def generate_query_answer_with_deepseek(request: Any) -> str:
 
 def generate_query_answer_stream_with_deepseek(request: Any, on_token: Callable[[str], None]) -> str:
     return DeepSeekClient.from_environment().generate_query_answer_stream(request, on_token)
+
+
+def generate_proposal_writes_with_deepseek(request: Any) -> Any:
+    return DeepSeekClient.from_environment().generate_proposal_writes(request)
+
+
+def merge_page_body_with_deepseek(request: Any) -> str:
+    return DeepSeekClient.from_environment().merge_page_body(request)
 
 
 def _build_init_prompt(name: str, description: str) -> str:
@@ -217,6 +257,18 @@ def _build_ingest_extraction_prompt(request: Any) -> str:
 
 已有 source summary：
 {request.summary}
+
+项目目的：
+{request.purpose}
+
+Wiki 协议：
+{request.schema}
+
+已有 wiki/index.md：
+{request.index}
+
+已有 wiki/overview.md：
+{request.overview}
 
 请只输出 JSON，不要输出 Markdown 代码围栏。格式如下：
 {{
@@ -309,6 +361,85 @@ Wiki 协议：
 
 Context:
 {context}
+"""
+
+
+def _build_proposal_prompt(request: Any) -> str:
+    citations = "\n".join(f"- {citation}" for citation in request.citations) or "- none"
+    context_pages = "\n".join(f"- {page}" for page in request.context_pages) or "- none"
+    candidate_pages = "\n\n".join(
+        f"### {page.path}\nTitle: {page.title}\n\n{page.content}" for page in request.candidate_pages
+    ) or "暂无候选长期知识页面。"
+    return f"""请把用户已经决定沉淀的上一次问答整理成 LLM Wiki 写入计划。
+
+用户沉淀指令：
+{request.instruction}
+
+上一次用户问题：
+{request.question}
+
+上一次大模型回答：
+{request.answer}
+
+上一次回答引用：
+{citations}
+
+上一次上下文页面：
+{context_pages}
+
+候选已有长期知识页面：
+{candidate_pages}
+
+项目目的：
+{request.purpose}
+
+Wiki 协议：
+{request.schema}
+
+请只输出 JSON，不要输出 Markdown 代码围栏。格式如下：
+{{
+  "writes": [
+    {{
+      "path": "wiki/concepts/example.md",
+      "page_type": "concept",
+      "title": "页面标题",
+      "content": "完整 Markdown 正文，可以包含 frontmatter；如果不含 frontmatter，程序会补齐"
+    }}
+  ]
+}}
+
+规则：
+- 原始用户问题和大模型回答已经由程序保存到 `wiki/queries/`。
+- 请先判断这次问答是否包含值得进入长期知识页的新信息。
+- 如果有新信息，应优先补充或更新已有页面；只有现有页面无法自然承载时，才创建新页面。
+- 如果与已有长期知识重复度过高，且没有新的概念、边界、例子、流程或结论，则不要写入长期知识页，返回空 writes：`{{"writes":[]}}`。
+- 不要写入 `wiki/sources/`；对话沉淀不是外部原始资料。
+- path 只能在 `wiki/concepts/`、`wiki/entities/`、`wiki/synthesis/` 下。
+- 文件名要短、可读、适合长期维护。
+- 内容必须基于上一次问答和引用，不要编造额外事实。
+"""
+
+
+def _build_page_body_merge_prompt(request: Any) -> str:
+    # frontmatter 已由本地确定性逻辑合并，这里只让模型处理正文语义。
+    return f"""请合并一个 LLM Wiki 页面正文。
+
+页面标题：{request.title}
+页面类型：{request.page_type}
+
+已有正文：
+{request.existing_body}
+
+新增正文：
+{request.incoming_body}
+
+要求：
+- 只输出合并后的 Markdown 正文，不要输出 YAML frontmatter。
+- 保留已有正文中仍然有效的信息。
+- 将新增正文自然融合进合适章节，不要机械追加重复段落。
+- 如果两边有重复内容，只保留更清晰的一版。
+- 不要编造已有正文和新增正文之外的事实。
+- 保留一级标题。
 """
 
 

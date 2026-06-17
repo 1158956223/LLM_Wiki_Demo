@@ -12,6 +12,7 @@ from typing import Callable
 from .config import IngestConfig, load_config
 from .errors import DeepSeekUnavailableError, DuplicateSourceError, ProjectNotInitializedError, UnsafePathError
 from .log import append_log
+from .page_merge import PageBodyMergeGenerator, merge_page_content
 from .paths import ProjectPaths
 from .search import rebuild_search_index, _title_from_wiki_page
 from .state import load_state, write_state
@@ -38,6 +39,10 @@ class IngestExtractionRequest:
     source_path: str
     summary: str
     chunks: list[str]
+    purpose: str
+    schema: str
+    index: str
+    overview: str
 
 
 @dataclass(frozen=True)
@@ -79,6 +84,7 @@ class IngestResult:
     source_path: str
     wiki_page: str
     sha256: str
+    skipped: bool = False
 
 
 def ingest_source(
@@ -88,19 +94,34 @@ def ingest_source(
         summary_generator: SummaryGenerator | None = None,
         extraction_generator: ExtractionGenerator | None = None,
         overview_generator: OverviewGenerator | None = None,
+        body_merge_generator: PageBodyMergeGenerator | None = None,
         confirm_name_conflict: NameConflictConfirmFunc | None = None,
         progress: ProgressReporter | None = None,
 ) -> IngestResult:
     paths = ProjectPaths(Path(root))
     _ensure_initialized(paths)
     _report(progress, "[1/7] 校验来源文件")
-    incoming_path, target_path, digest = _resolve_external_source(
+    incoming_path, target_path, digest, skipped = _resolve_external_source(
         paths, source, confirm_name_conflict=confirm_name_conflict
     )
     source_rel = target_path.relative_to(paths.root).as_posix()
-    source_text = incoming_path.read_text(encoding="utf-8")
     wiki_page = paths.wiki_dir / "sources" / target_path.name
     wiki_rel = wiki_page.relative_to(paths.root).as_posix()
+    if skipped:
+        # 同一路径、同一 sha256 且 wiki source 页仍存在时，直接记日志跳过，避免重复消耗 LLM。
+        append_log(
+            paths.wiki_log,
+            "ingest",
+            {
+                "source": source_rel,
+                "wiki_page": wiki_rel,
+                "sha256": digest,
+                "status": "skipped unchanged",
+            },
+        )
+        return IngestResult(source_path=source_rel, wiki_page=wiki_rel, sha256=digest, skipped=True)
+
+    source_text = incoming_path.read_text(encoding="utf-8")
     title = _title_from_source(incoming_path, source_text)
     config = load_config(paths.config).ingest
     request = _build_summary_request(source_text, source_rel, config)
@@ -115,6 +136,11 @@ def ingest_source(
             source_path=source_rel,
             summary=summary,
             chunks=request.chunks,
+            # 抽取时带上已有 wiki 语境，让模型尽量复用既有概念名和页面结构。
+            purpose=paths.purpose.read_text(encoding="utf-8"),
+            schema=paths.schema.read_text(encoding="utf-8"),
+            index=paths.wiki_index.read_text(encoding="utf-8"),
+            overview=paths.wiki_overview.read_text(encoding="utf-8") if paths.wiki_overview.exists() else "",
         )
     )
     overview = (overview_generator or _default_overview_generator())(
@@ -131,14 +157,14 @@ def ingest_source(
     _report(progress, "[4/7] 写入 raw 和 wiki 页面")
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # 将原始文件复制到raw
+    # 将原始文件复制到 raw，wiki 页面只保存摘要和长期知识结构。
     shutil.copy2(incoming_path, target_path)
     wiki_page.parent.mkdir(parents=True, exist_ok=True)
 
     # 生成source页面
     wiki_page.write_text(_source_page(title, source_rel, summary, extraction), encoding="utf-8")
-    concept_pages = _write_concept_pages(paths, extraction.concepts, source_rel)
-    entity_pages = _write_entity_pages(paths, extraction.entities, source_rel)
+    concept_pages = _write_concept_pages(paths, extraction.concepts, source_rel, body_merge_generator=body_merge_generator)
+    entity_pages = _write_entity_pages(paths, extraction.entities, source_rel, body_merge_generator=body_merge_generator)
 
     state = load_state(paths.state)
     state.setdefault("sources", {})[source_rel] = {
@@ -186,7 +212,7 @@ def _resolve_external_source(
     source: str | Path,
     *,
     confirm_name_conflict: NameConflictConfirmFunc | None,
-) -> tuple[Path, Path, str]:
+) -> tuple[Path, Path, str, bool]:
     source_path = Path(source).expanduser().resolve()
     try:
         source_path.relative_to(paths.root)
@@ -199,21 +225,38 @@ def _resolve_external_source(
     if not source_path.exists():
         raise FileNotFoundError(source_path)
     digest = hashlib.sha256(source_path.read_bytes()).hexdigest()
-    _ensure_not_duplicate(paths, digest)
     target_path = paths.raw_sources_dir / source_path.name
+    source_rel = target_path.relative_to(paths.root).as_posix()
+    state = load_state(paths.state)
+    existing_entry = state.get("sources", {}).get(source_rel)
+
+    # 如果同一路径、同一 hash，并且对应的 wiki source 页面还存在，就直接跳过
+    if (
+        isinstance(existing_entry, dict)
+        and existing_entry.get("sha256") == digest
+        and target_path.exists()
+        and (paths.root / str(existing_entry.get("wiki_page", ""))).exists()
+    ):
+        return source_path, target_path, digest, True
+
+    _ensure_not_duplicate(paths, digest, allowed_source=source_rel)
+
+    # 处理同名但不同内容
     if target_path.exists():
         target_digest = hashlib.sha256(target_path.read_bytes()).hexdigest()
         if target_digest == digest:
             raise DuplicateSourceError(f"source has already been ingested: {target_path}")
         if confirm_name_conflict is None or not confirm_name_conflict(target_path, source_path):
             raise FileExistsError(f"raw source already exists with different content: {target_path}")
-    return source_path, target_path, digest
+    return source_path, target_path, digest, False
 
 
 # 防止重复导入
-def _ensure_not_duplicate(paths: ProjectPaths, digest: str) -> None:
+def _ensure_not_duplicate(paths: ProjectPaths, digest: str, *, allowed_source: str | None = None) -> None:
     state = load_state(paths.state)
     for source_rel, entry in state.get("sources", {}).items():
+        if source_rel == allowed_source:
+            continue
         if entry.get("sha256") == digest:
             raise DuplicateSourceError(f"source has already been ingested: {source_rel}")
 
@@ -314,6 +357,14 @@ def _default_overview_generator() -> OverviewGenerator:
     return generate_ingest_overview_with_deepseek
 
 
+def _default_body_merge_generator() -> PageBodyMergeGenerator:
+    if not os.environ.get("DEEPSEEK_API_KEY"):
+        raise DeepSeekUnavailableError("DEEPSEEK_API_KEY is not set")
+    from .deepseek import merge_page_body_with_deepseek
+
+    return merge_page_body_with_deepseek
+
+
 # 生成source中的内容
 def _source_page(title: str, source_rel: str, summary: str, extraction: IngestExtraction) -> str:
     today = date.today().isoformat()
@@ -352,7 +403,13 @@ status: active
 """
 
 
-def _write_concept_pages(paths: ProjectPaths, concepts: list[ExtractedConcept], source_rel: str) -> list[Path]:
+def _write_concept_pages(
+    paths: ProjectPaths,
+    concepts: list[ExtractedConcept],
+    source_rel: str,
+    *,
+    body_merge_generator: PageBodyMergeGenerator | None,
+) -> list[Path]:
     (paths.wiki_dir / "concepts").mkdir(parents=True, exist_ok=True)
     return [
         _upsert_knowledge_page(
@@ -363,6 +420,7 @@ def _write_concept_pages(paths: ProjectPaths, concepts: list[ExtractedConcept], 
             concept.summary,
             concept.related,
             source_rel,
+            body_merge_generator=body_merge_generator,
             sections=[
                 ("核心要点", concept.key_points),
                 ("适用场景", concept.usage_contexts),
@@ -373,7 +431,13 @@ def _write_concept_pages(paths: ProjectPaths, concepts: list[ExtractedConcept], 
     ]
 
 
-def _write_entity_pages(paths: ProjectPaths, entities: list[ExtractedEntity], source_rel: str) -> list[Path]:
+def _write_entity_pages(
+    paths: ProjectPaths,
+    entities: list[ExtractedEntity],
+    source_rel: str,
+    *,
+    body_merge_generator: PageBodyMergeGenerator | None,
+) -> list[Path]:
     (paths.wiki_dir / "entities").mkdir(parents=True, exist_ok=True)
     pages: list[Path] = []
     for entity in entities:
@@ -386,6 +450,7 @@ def _write_entity_pages(paths: ProjectPaths, entities: list[ExtractedEntity], so
                 entity.summary,
                 entity.related,
                 source_rel,
+                body_merge_generator=body_merge_generator,
                 sections=[
                     ("角色/类型", entity.role or entity.category),
                     ("相关事实", entity.facts),
@@ -397,7 +462,7 @@ def _write_entity_pages(paths: ProjectPaths, entities: list[ExtractedEntity], so
     return pages
 
 
-# 如果页面不存在，就创建；如果页面已经存在，就追加内容。
+# 只负责把抽取结果渲染成“候选页面”；已有页面的 frontmatter/正文合并交给 page_merge。
 def _upsert_knowledge_page(
     paths: ProjectPaths,
     directory: str,
@@ -409,6 +474,7 @@ def _upsert_knowledge_page(
     *,
     sections: list[tuple[str, str | list[str]]] | None = None,
     extra_frontmatter: str = "",
+    body_merge_generator: PageBodyMergeGenerator | None,
 ) -> Path:
     page = paths.wiki_dir / directory / f"{_slug(title)}.md"
     today = date.today().isoformat()
@@ -416,26 +482,7 @@ def _upsert_knowledge_page(
     if section_text:
         summary = f"{summary.rstrip()}\n\n{section_text.rstrip()}"
     related_lines = _link_lines(related)
-    addition = f"""## 来自 {source_rel} 的补充
-
-{summary}
-
-### 关联
-{related_lines}
-
-### 来源
-
-- `{source_rel}`
-"""
-    if page.exists():
-        text = page.read_text(encoding="utf-8")
-        if f"- `{source_rel}`" in text:
-            return page
-        page.write_text(text.rstrip() + "\n\n" + addition, encoding="utf-8")
-        return page
-
-    page.write_text(
-        f"""---
+    candidate = f"""---
 type: {page_type}
 title: {title}
 created_at: {today}
@@ -458,9 +505,18 @@ status: active
 ## 来源
 
 - `{source_rel}`
-""",
-        encoding="utf-8",
-    )
+"""
+    if page.exists():
+        text = page.read_text(encoding="utf-8")
+        if f"- `{source_rel}`" in text:
+            return page
+        # 正文合并默认走 DeepSeek；测试或离线流程可以注入 body_merge_generator 替代。
+        merger = body_merge_generator or _default_body_merge_generator()
+        merged = merge_page_content(text, candidate, body_merge_generator=merger)
+        page.write_text(merged, encoding="utf-8")
+        return page
+
+    page.write_text(candidate, encoding="utf-8")
     return page
 
 

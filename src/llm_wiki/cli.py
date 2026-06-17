@@ -7,6 +7,7 @@ from typing import Callable, Sequence
 
 from .ingest import ExtractionGenerator, OverviewGenerator, SummaryGenerator, ingest_source
 from .init import InitContent, initialize_project
+from .proposal import ProposalPlanGenerator, propose_change
 from .query import QueryAnswerGenerator, QueryAnswerStreamer, answer_query
 
 
@@ -25,6 +26,10 @@ def build_parser() -> argparse.ArgumentParser:
     query_parser.add_argument("--path", type=Path)
     query_parser.add_argument("question")
 
+    add_parser = subparsers.add_parser("add", help="save the last query into the wiki")
+    add_parser.add_argument("--path", type=Path)
+    add_parser.add_argument("instruction")
+
     return parser
 
 
@@ -39,6 +44,7 @@ def main(
     ingest_overview_generator: OverviewGenerator | None = None,
     query_answer_generator: QueryAnswerGenerator | None = None,
     query_answer_streamer: QueryAnswerStreamer | None = None,
+    proposal_plan_generator: ProposalPlanGenerator | None = None,
     print_func: Callable[..., None] | None = None,
 ) -> int:
     print_func = print_func or builtins.print
@@ -75,7 +81,10 @@ def main(
             ),
             progress=print_func,
         )
-        print_func(f"ingest completed: {result.source_path} -> {result.wiki_page}")
+        if result.skipped:
+            print_func(f"该文件已存在！")
+        else:
+            print_func(f"ingest completed: {result.source_path} -> {result.wiki_page}")
         return 0
 
     if args.command == "query":
@@ -96,6 +105,18 @@ def main(
             print_func("")
         else:
             print_func(result.answer)
+        return 0
+
+    if args.command == "add":
+        target_root = (root / args.path) if args.path else root
+        result = propose_change(
+            target_root,
+            args.instruction,
+            plan_generator=proposal_plan_generator,
+        )
+        print_func(f"add completed: {result.record_path}")
+        for page in result.written_pages:
+            print_func(f"- {page}")
         return 0
 
     return 0

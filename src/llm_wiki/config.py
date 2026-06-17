@@ -34,7 +34,6 @@ class IngestConfig:
 
 @dataclass(frozen=True)
 class LintConfig:
-    pending_proposal_days: int = 7
     long_page_char_limit: int = 12000
 
 
@@ -78,7 +77,6 @@ chunk_min_chars = 2000
 chunk_max_chars = 4000
 
 [lint]
-pending_proposal_days = 7
 long_page_char_limit = 12000
 
 [language]
@@ -95,11 +93,13 @@ def load_config(path: Path) -> AppConfig:
         return DEFAULT_CONFIG
 
     data = _parse_simple_toml(path.read_text(encoding="utf-8"))
+    lint_data = dict(data.get("lint", {}))
+    lint_data.pop("pending_proposal_days", None)
     return AppConfig(
         llm=LlmConfig(**data.get("llm", {})),
         search=SearchConfig(**data.get("search", {})),
         ingest=IngestConfig(**data.get("ingest", {})),
-        lint=LintConfig(**data.get("lint", {})),
+        lint=LintConfig(**lint_data),
         language=LanguageConfig(**data.get("language", {})),
     )
 
